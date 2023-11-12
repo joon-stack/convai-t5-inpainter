@@ -14,7 +14,7 @@ Following this [instruction](https://docs.anaconda.com/free/anaconda/install/ind
 ```
 conda create -n convai python=3.9
 conda activate convai
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 ## Overview
