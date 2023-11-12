@@ -8,11 +8,24 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 from transformers import AdamW, get_linear_schedule_with_warmup
-import sys
+import argparse
+import random
+import os
+
+
+seed = 2023
+
+torch.backends.cudnn.deterministic = True
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+print('pwd', os.getcwd())
+
 
 def add_prefix(x):
     idx, item = x
-    return str(idx % 2) + ":" + item
+    return str(idx % 2) + ": " + item
 
 def preprocess(x):
     a = dict()
@@ -42,8 +55,8 @@ def process_dataset(dataset):
             assert type(dialog) == type([])
             dialog_length = len(dialog)
             masked_idx = np.random.randint(0, dialog_length)
-            masked_dataset['target'].append(dialog[masked_idx][2:] +" ")
-            dialog[masked_idx] = dialog[masked_idx][:2] + "<MASK>"
+            masked_dataset['target'].append(dialog[masked_idx][3:] +" ")
+            dialog[masked_idx] = dialog[masked_idx][:3] + "<MASK>"
             masked_dataset['context'].append(" ".join(dialog))
 
         processed_dataset[sp] = masked_dataset
@@ -79,12 +92,21 @@ class CustomDataset(Dataset_torch):
 
 
 if __name__ == "__main__":
-# check GPU
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", type=str, default='t', help="t for taskmaster (will be updated for qrecc and or-quac)")
+    parser.add_argument("--batch_size", type=int, default=16, help="batch size")
+    parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="weight decaying rate")
+    parser.add_argument("--model_name", type=str, default="t5-small", help="the model name, default: t5-small")
+    parser.add_argument("--epochs", type=int, default=100, help="the number of epochs")
+
+    args = parser.parse_args()
+    # check GPU
     print('Cuda:', torch.cuda.is_available())
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    tokenizer = T5Tokenizer.from_pretrained("t5-small")
-    model = T5ForConditionalGeneration.from_pretrained("t5-small")
+    tokenizer = T5Tokenizer.from_pretrained(args.model_name)
+    model = T5ForConditionalGeneration.from_pretrained(args.model_name)
     model = nn.DataParallel(model)
     # model.to(device)
 
@@ -101,7 +123,8 @@ if __name__ == "__main__":
     taskmaster_dataset = load_dataset("taskmaster1", "one_person_dialogs")
     qrecc_dataset = load_dataset("voidful/qrecc")
 
-    dataset = process_dataset(taskmaster_dataset)
+    if args.data == "t":
+        dataset = process_dataset(taskmaster_dataset)
 
     ds = DatasetDict({
         'train': Dataset.from_dict(dataset['train']), 
@@ -122,12 +145,12 @@ if __name__ == "__main__":
     dataset_test = CustomDataset(tokenized_dataset['test'])
 
 
-    train_dataloader = DataLoader(dataset_train, batch_size=16)
-    val_dataloader = DataLoader(dataset_validation, batch_size=16)
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size)
+    val_dataloader = DataLoader(dataset_validation, batch_size=args.batch_size)
 
-    num_epochs = 3
-    num_training_steps = 3 * len(train_dataloader)
-    optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
+    num_epochs = args.epochs
+    num_training_steps = args.epochs * len(train_dataloader)
+    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
 
     best_val_loss = float("inf")
