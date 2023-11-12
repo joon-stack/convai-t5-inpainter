@@ -110,7 +110,8 @@ if __name__ == "__main__":
 
     tokenizer = T5Tokenizer.from_pretrained(args.model_name)
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
-    model = nn.DataParallel(model)
+    model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
+    model.to(f'cuda:{model.device_ids[0]}')
     # model.to(device)
 
     print("Model on", device)
@@ -157,43 +158,43 @@ if __name__ == "__main__":
     lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
 
     best_val_loss = float("inf")
-    for epoch in tqdm(range(num_epochs)):
+    for epoch in range(num_epochs):
         # training
         loss = 0
         model.train()
-        for batch_i, batch in tqdm(enumerate(train_dataloader)):
+        for batch_i, batch in enumerate(train_dataloader):
             input_ids, attention_mask, labels, labels_attention_mask = batch
             labels_attention_mask = labels_attention_mask.type(torch.bool)
             labels_masked = torch.masked_fill(labels, ~labels_attention_mask, -100)
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            labels_masked = labels_masked.to(device)
+            input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
+            attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
+            labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
             output = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels_masked)
             optimizer.zero_grad()
-            output.loss.backward()
+            output.loss.mean().backward()
             optimizer.step()
             lr_scheduler.step()
-            loss += output.loss.item()
+            loss += output.loss.mean().item()
         avg_trn_loss = loss / len(train_dataloader)
         print(f"Train loss: {avg_trn_loss}")
 
         # validation
         loss = 0
         model.eval()
-        for batch_i, batch in tqdm(enumerate(val_dataloader)):
+        for batch_i, batch in enumerate(val_dataloader):
             input_ids, attention_mask, labels, labels_attention_mask = batch
             labels_attention_mask = labels_attention_mask.type(torch.bool)
             labels_masked = torch.masked_fill(labels, ~labels_attention_mask, -100)
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            labels_masked = labels_masked.to(device)
+            input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
+            attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
+            labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
             
             with torch.no_grad():
                 output = model(input_ids=input_ids, 
                                 attention_mask=attention_mask, 
                                 labels=labels_masked
                                 )
-            loss += output.loss.item()
+            loss += output.loss.mean().item()
 
         avg_val_loss = loss / len(val_dataloader)
         print(f"Validation loss: {avg_val_loss}")
