@@ -101,6 +101,9 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=100, help="the number of epochs")
 
     args = parser.parse_args()
+
+    # Checkpoint directory
+    os.mkdir("checkpoints") if not os.path.exists("checkpoints") else None
     # check GPU
     print('Cuda:', torch.cuda.is_available())
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
