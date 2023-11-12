@@ -5,7 +5,9 @@ This is a code storage for the 2023-2 ConvAI project of 정영준, 송형우, �
 ## Content
 
 1. [Installation](#installation)
-2. [Command](#our-commands)
+2. [Overview](#Overview)
+3. [Dataset](#Dataset)
+4. [Commands](#Commands)
 
 ## Installation
 Following this [instruction](https://docs.anaconda.com/free/anaconda/install/index.html), please install anaconda virtualenv on your system and then follow the commands below.
@@ -21,7 +23,7 @@ This code repo contains a reproduced version of dialog inpainter based on T5 che
 ## Dataset
 There are four datasets in the original paper. Unfortunately, the PublicDialog dataset is not an open source, so we used the rest of datasets, which are [TaskMaster-1](https://huggingface.co/datasets/taskmaster1), [OR-QuAC](https://github.com/prdwb/orconvqa-release), and [QReCC](https://huggingface.co/datasets/voidful/qrecc). Currently, only TaskMaster-1 is used for training the model (will be updated soon).
 
-## Our Commands
+## Commands
 ```sh
 python run_model.py --data t --batch_size 16 --lr 5e-5 --weight_decay 0.01 --model_name t5-small --epochs 100
 ```
