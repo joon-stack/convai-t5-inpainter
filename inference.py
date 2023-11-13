@@ -11,6 +11,18 @@ from transformers import AdamW, get_linear_schedule_with_warmup
 import argparse
 import random
 import os
+import re
+
+seed = 2023
+
+torch.backends.cudnn.deterministic = True
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+print('pwd', os.getcwd())
+
+
 
 def add_prefix(x):
     idx, item = x
@@ -81,7 +93,7 @@ class CustomDataset(Dataset_torch):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default='t', help="t for taskmaster (will be updated for qrecc and or-quac)")
-    parser.add_argument("--checkpoint_name", type=str, help="checkpoint name")
+    parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
     parser.add_argument("--model_name", type=str, default="t5-small", help="model name (default: t5-small)")
     
 
@@ -96,8 +108,10 @@ if __name__ == "__main__":
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
     
     model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
-    model.load_state_dict(torch.load("checkpoints/"+args.checkpoint_name)['model_state_dict'])
-    print("Model load success from ", "checkpoints/"+args.checkpoint_name)
+    if args.checkpoint_name != None:
+        model.load_state_dict(torch.load("checkpoints/"+args.checkpoint_name)['model_state_dict'])
+        print("Model load success from ", "checkpoints/"+args.checkpoint_name)
+    
     model.to(f'cuda:{model.device_ids[0]}')
 
     print("Model on", device)
@@ -127,7 +141,7 @@ if __name__ == "__main__":
     test_dataloader = DataLoader(dataset_test, batch_size=64)
 
     # test
-    fname = "results/test.txt"
+    fname = f"results/test_{args.checkpoint_name}.txt"
     with open(fname, 'w') as f:
         model.eval()
         for batch_i, batch in enumerate(test_dataloader):
@@ -137,13 +151,22 @@ if __name__ == "__main__":
             input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
             attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
             labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
-            outputs = model.module.generate(input_ids)
-
+            outputs = model.module.generate(input_ids, max_new_tokens=100)
+            decoded_context = list(map(lambda x: tokenizer.decode(x, skip_special_tokens=True), input_ids))
             decoded_pred = list(map(lambda x: tokenizer.decode(x, skip_special_tokens=True), outputs))
             decoded_label = list(map(lambda x: tokenizer.decode(x, skip_special_tokens=True), labels))
             for i in range(len(decoded_pred)):
-                f.write("Label: " + decoded_label[i] + "\n")
+                decoded_context_lines = re.split(r'[01]:', decoded_context[i])
+                f.write("Context: " + "\n")
+                cnt = 0
+                for line in decoded_context_lines:
+                    if line != "":
+                        f.write(str(cnt%2)+ ":" + line + "\n")
+                        cnt += 1
+
                 f.write("Pred: " + decoded_pred[i] + "\n")
+                f.write("Label: " + decoded_label[i] + "\n")
+                f.write("--------------------------------\n")
         
 
         
