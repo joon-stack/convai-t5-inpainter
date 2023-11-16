@@ -11,6 +11,7 @@ from transformers import AdamW, get_linear_schedule_with_warmup
 import argparse
 import random
 import os
+import json
 
 
 seed = 2023
@@ -62,6 +63,63 @@ def process_dataset(dataset):
         processed_dataset[sp] = masked_dataset
 
     return processed_dataset
+
+def process_dataset_qrecc(input_dataset):
+    processed_dataset = {}
+    for sp in ['train', 'test']:
+        dataset = input_dataset[sp]
+        conv_nos = list(map(lambda x: x['Conversation_no'], dataset))
+        conv_last_nos_idx = []
+        for i, x in enumerate(conv_nos):
+            if i == len(conv_nos) - 1:
+                break
+            if x < conv_nos[i + 1]:
+                conv_last_nos_idx.append(i)
+        dialogs = list(map(lambda i: dataset[i]['Context'] + [dataset[i]['Question']] + [dataset[i]['Answer']], conv_last_nos_idx))
+        dialogs_numbered = list(map(lambda x: list(map(lambda y: add_prefix(y), enumerate(x))), dialogs))
+        masked_dataset = {'target':[], 'context':[]}
+        for dialog in dialogs_numbered:
+            dialog_length = len(dialog)
+            masked_idx = np.random.randint(0, dialog_length)
+            masked_dataset['target'].append(dialog[masked_idx][3:])
+            dialog[masked_idx] = dialog[masked_idx][:3] + "<MASK>"
+            masked_dataset['context'].append(" ".join(dialog))
+        
+        if sp == 'test':
+            processed_dataset['validation'] = masked_dataset
+        else: 
+            processed_dataset[sp] = masked_dataset
+    
+    return processed_dataset
+
+def process_dataset_orquac():
+    processed_dataset = {}
+    for sp in ['train', 'dev', 'test']:
+        with open(f"data/{sp}.txt", 'r') as f:
+            lines = f.readlines()
+        dict_collection = [json.loads(line) for line in lines]
+        conv_last_nos_idxs = []
+        for i, col in enumerate(dict_collection):
+            if col['qid'][-1] == '0':
+                if i > 0:
+                    conv_last_nos_idxs.append(i - 1)
+        tmp = list(map(lambda i: (dict_collection[i]['history'] + [{'question': dict_collection[i]['question'], 'answer': dict_collection[i]['answer']}]), conv_last_nos_idxs))
+        dialogs = list(map(lambda x: list(map(lambda y: ["0: " + y['question'], "1: " + y['answer']['text']], x)), tmp)) 
+        dialogs_merged = list(map(lambda x: sum(x, []), dialogs))
+        masked_dataset = {'target':[], 'context':[]}
+        for dialog in dialogs_merged:
+            dialog_length = len(dialog)
+            masked_idx = np.random.randint(0, dialog_length)
+            masked_dataset['target'].append(dialog[masked_idx][3:].replace("CANNOTANSWER", "I cannot answer the question."))
+            dialog[masked_idx] = dialog[masked_idx][:3] + "<MASK>"
+            masked_dataset['context'].append(" ".join(dialog).replace("CANNOTANSWER", "I cannot answer the question."))
+        if sp != 'dev':
+            processed_dataset[sp] = masked_dataset
+        else:
+            processed_dataset['validation'] = masked_dataset
+
+    return processed_dataset
+
 
 def tokenize(x):
     context_tokenized = tokenizer(x['context'],  padding=True, truncation=True, return_tensors='pt')
@@ -130,17 +188,71 @@ if __name__ == "__main__":
     if args.data == "t":
         dataset = process_dataset(taskmaster_dataset)
 
-    ds = DatasetDict({
-        'train': Dataset.from_dict(dataset['train']), 
-        'validation': Dataset.from_dict(dataset['validation']),
-        'test': Dataset.from_dict(dataset['test'])
-    })
+        ds = DatasetDict({
+            'train': Dataset.from_dict(dataset['train']), 
+            'validation': Dataset.from_dict(dataset['validation']),
+            'test': Dataset.from_dict(dataset['test'])
+        })
 
-    tokenized_dataset = DatasetDict({
-        'train': tokenize(ds['train']), 
-        'validation': tokenize(ds['validation']),
-        'test': tokenize(ds['test'])
-    })
+        tokenized_dataset = DatasetDict({
+            'train': tokenize(ds['train']), 
+            'validation': tokenize(ds['validation']),
+            'test': tokenize(ds['test'])
+        })
+    elif args.data == "qt":
+        dataset_tm = process_dataset(taskmaster_dataset)
+        dataset_qrecc = process_dataset_qrecc(qrecc_dataset)
+        dataset = {
+                    'train': {'target':[], 'context':[]}, 
+                    'validation': {'target':[], 'context':[]}, 
+                    'test': {'target':[], 'context':[]}
+                    }
+
+        for sp in ['train', 'validation', 'test']:
+            try:
+                dataset[sp]['target'].extend(dataset_tm[sp]['target'])
+                dataset[sp]['context'].extend(dataset_tm[sp]['context'])
+                dataset[sp]['target'].extend(dataset_qrecc[sp]['target'])
+                dataset[sp]['context'].extend(dataset_qrecc[sp]['context'])
+            except:
+                continue
+        
+        tokenized_dataset = DatasetDict({
+            'train': tokenize(dataset['train']), 
+            'validation': tokenize(dataset['validation']),
+            'test': tokenize(dataset['test'])
+        })
+    
+    elif args.data == "qot":
+        dataset_tm = process_dataset(taskmaster_dataset)
+        dataset_qrecc = process_dataset_qrecc(qrecc_dataset)
+        dataset_orquac = process_dataset_orquac()
+        dataset = {
+                    'train': {'target':[], 'context':[]}, 
+                    'validation': {'target':[], 'context':[]}, 
+                    'test': {'target':[], 'context':[]}
+                    }
+
+        for sp in ['train', 'validation', 'test']:
+            try:
+                dataset[sp]['target'].extend(dataset_tm[sp]['target'])
+                dataset[sp]['context'].extend(dataset_tm[sp]['context'])
+                dataset[sp]['target'].extend(dataset_orquac[sp]['target'])
+                dataset[sp]['context'].extend(dataset_orquac[sp]['context'])
+                dataset[sp]['target'].extend(dataset_qrecc[sp]['target'])
+                dataset[sp]['context'].extend(dataset_qrecc[sp]['context'])
+                
+            except:
+                continue
+        
+        tokenized_dataset = DatasetDict({
+            'train': tokenize(dataset['train']), 
+            'validation': tokenize(dataset['validation']),
+            'test': tokenize(dataset['test'])
+        })
+        
+    
+    print(tokenized_dataset)
 
 
 
@@ -158,7 +270,10 @@ if __name__ == "__main__":
     lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
 
     best_val_loss = float("inf")
+    early_stop_cnt = 0
     for epoch in range(num_epochs):
+        if early_stop_cnt > 4:
+            break
         # training
         loss = 0
         model.train()
@@ -209,3 +324,5 @@ if __name__ == "__main__":
                 },
                 f"checkpoints/epoch_{epoch}.pt"
             )
+        else:
+            early_stop_cnt += 1

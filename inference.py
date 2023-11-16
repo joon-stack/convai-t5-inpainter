@@ -23,7 +23,6 @@ torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
 
-
 def add_prefix(x):
     idx, item = x
     return str(idx % 2) + ": " + item
@@ -127,6 +126,8 @@ if __name__ == "__main__":
 
     if args.data == "t":
         dataset = process_dataset(taskmaster_dataset)
+    elif args.data == "ottqa":
+        dataset = 
 
     ds = DatasetDict({
         'test': Dataset.from_dict(dataset['test'])
