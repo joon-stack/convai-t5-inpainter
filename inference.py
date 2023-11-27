@@ -126,8 +126,6 @@ if __name__ == "__main__":
 
     if args.data == "t":
         dataset = process_dataset(taskmaster_dataset)
-    elif args.data == "ottqa":
-        dataset = 
 
     ds = DatasetDict({
         'test': Dataset.from_dict(dataset['test'])

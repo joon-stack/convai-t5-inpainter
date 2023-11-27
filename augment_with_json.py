@@ -24,21 +24,30 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
+def concat_table(x):
+    concat_data = " ".join(sum(x['table']['data'], []))
+    # rows = f"<TABLE> TITLE: {x['table']['title']} HEADER: {' '.join(x['table']['header'])} DATA: {concat_data}"
+    rows = f"{x['table']['title']} {' '.join(x['table']['header'])} {concat_data}"
+
+    return (x['qid'], rows)
+
 def process_dataset_from_json(fname):
     with open(fname, 'r') as f:
         data = json.load(f)
-        candidates = list(map(lambda x: (x['qid'], x['candidates']), data))
-        candidates = list(map(lambda x: (x[0], list(map(lambda x: "1: " + x, x[1]))), candidates))
-        candidates_dict = dict(candidates)
+    candidates = list(map(lambda x: (x['qid'], x['candidates']), data))
+    candidates = list(map(lambda x: (x[0], list(map(lambda x: "1: " + x, x[1]))), candidates))
+    candidates_dict = dict(candidates)
+    tables = list(map(concat_table, data))
+    tables_dict = dict(tables)
 
-    return candidates_dict
+    return candidates_dict, tables_dict
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default='t', help="t for taskmaster (will be updated for qrecc and or-quac)")
     parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
     parser.add_argument("--model_name", type=str, default="t5-small", help="model name (default: t5-small)")
-    
+    parser.add_argument("--use_table", type=str, default='o', help="whether to use table as an input of the inpainter")
 
     args = parser.parse_args()
 
@@ -71,33 +80,31 @@ if __name__ == "__main__":
     if args.data == "t":
         dataset = process_dataset(taskmaster_dataset)
     elif args.data == "ottqa":
-        candidates = process_dataset_from_json("data/new_dev_clean.json")
+        candidates, tables = process_dataset_from_json("data/new_dev.json")
 
 
     # test
-    fname = f"results/aug_test_{args.checkpoint_name}.txt"
+    fname = f"results/aug_test_{args.checkpoint_name}_table_{args.use_table}.txt"
     with open(fname, 'w') as f:
         model.eval()
-        # tmp_cnt = 0
+        tmp_cnt = 0
         for key in tqdm(candidates):
-            # if tmp_cnt == 5:
-            #     break
+            if tmp_cnt == 5:
+                break
             contexts = candidates[key]
-            tmp = ""
+            table = tables[key]
+            tmp = table if args.use_table == 'o' else ""
             for i, context in enumerate(contexts):
                 tmp = tmp + " 0: <MASK> " + context
-                print(tmp)
                 context_tokenized = tokenizer(tmp.strip(), truncation=True, return_tensors='pt')
                 input_ids = context_tokenized['input_ids'].to(device)
                 outputs = model.module.generate(input_ids, max_new_tokens=100)
-                decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                
+                decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
                 tmp = tmp.replace("<MASK>", decoded_pred)
-                print(tmp)
             tmp = tmp.strip()
-            # print(tmp)
-            decoded_context_lines = re.split(r'[01]:', tmp)
-            # tmp_cnt += 1
+            print(tmp)
+            decoded_context_lines = re.split(r'[01]:', tmp)[1:]
+            tmp_cnt += 1
             cnt = 0
             for line in decoded_context_lines:
                 if line != "":
