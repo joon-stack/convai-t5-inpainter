@@ -169,7 +169,7 @@ if __name__ == "__main__":
     tokenizer = T5Tokenizer.from_pretrained(args.model_name)
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
     model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
-    model.to(f'cuda:{model.device_ids[0]}')
+    # model.to(f'cuda:{model.device_ids[0]}')
     # model.to(device)
 
     print("Model on", device)
@@ -279,7 +279,6 @@ if __name__ == "__main__":
         model.train()
         for batch_i, batch in enumerate(train_dataloader):
             input_ids, attention_mask, labels, labels_attention_mask = batch
-
             labels_attention_mask = labels_attention_mask.type(torch.bool)
             labels_masked = torch.masked_fill(labels, ~labels_attention_mask, -100)
             input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
