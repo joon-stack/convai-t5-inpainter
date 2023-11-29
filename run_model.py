@@ -12,6 +12,7 @@ import argparse
 import random
 import os
 import json
+from itertools import chain
 
 
 seed = 2023
@@ -120,6 +121,59 @@ def process_dataset_orquac():
 
     return processed_dataset
 
+def flatten_table(x):
+    title = x['title']
+    header = " ".join(x['header'])
+    data = list(map(lambda x: " ".join(x), x['data']))
+    data = " ".join(data)
+    return title + " " + header + " " + data
+
+def process_dataset_gpt():
+    with open("data/gpt/new_json.json", 'r') as f:
+        gpt = json.load(f)
+    qas = list(map(lambda x: x['qas'], gpt))
+    texts = list(map(lambda x: x['text'], gpt))
+    tables = list(map(lambda x: x['table'], gpt))
+    tables_flat = list(map(flatten_table, tables))
+    questions = list(map(lambda y: list(map(lambda x: x['question'], y)), qas))
+    answers = list(map(lambda y: list(map(lambda x: x['answer'], y)), qas))
+    srcs = list(map(lambda y: list(map(lambda x: x['src'], y)), qas))
+    qa_pairs = list(map(lambda x: {"questions": questions[x], "answers": answers[x]}, list(range(len(questions)))))
+    result = list(map(lambda x: list(chain.from_iterable(zip(x["questions"], x["answers"]))), qa_pairs))
+    result_prefix = list(map(lambda x: list(map(add_prefix, enumerate(x))), result))
+
+    data_train = result_prefix[:int(len(result_prefix) * 0.4)]
+    data_val = result_prefix[int(len(result_prefix) * 0.4):len(result_prefix) // 2]
+    data_test = result_prefix[len(result_prefix) // 2:]
+    srcs_train = srcs[:int(len(result_prefix) * 0.4)]
+    srcs_val = srcs[int(len(result_prefix) * 0.4):len(result_prefix) // 2]
+    srcs_test = srcs[len(result_prefix) // 2:]
+    tables_train = tables_flat[:int(len(result_prefix) * 0.4)]
+    tables_val = tables_flat[int(len(result_prefix) * 0.4):len(result_prefix) // 2]
+    tables_test = tables_flat[len(result_prefix) // 2:]
+    texts_train = texts[:int(len(result_prefix) * 0.4)]
+    texts_val = texts[int(len(result_prefix) * 0.4):len(result_prefix) // 2]
+    texts_test = texts[len(result_prefix) // 2:]
+
+    data = {'train': data_train, 'validation': data_val, 'test': data_test}
+    srcs = {'train': srcs_train, 'validation': srcs_val, 'test': srcs_test}
+    tables = {'train': tables_train, 'validation': tables_val, 'test': tables_test}
+    texts = {'train': texts_train, 'validation': texts_val, 'test': texts_test}
+
+    dataset = {}
+    for sp in ['train', 'validation', 'test']:
+        masked_dataset = {'context':[], 'target':[]}
+        for i, dialog in enumerate(data[sp]):
+            tmp = []
+            assert type(dialog) == type([])
+            dialog_length = len(dialog)
+            masked_idx = np.random.randint(0, dialog_length)
+            masked_dataset['target'].append(dialog[masked_idx][2:].strip())
+            dialog[masked_idx] = dialog[masked_idx][:2] + " <MASK>"
+            masked_dataset['context'].append("[DIALOG] " + " ".join(dialog) + " [SRC] " + srcs[sp][i][masked_idx // 2] + " [TABLE] " + tables[sp][i] + " [PARAGRAPH] " + texts[sp][i])
+        dataset[sp] = masked_dataset
+
+    return dataset
 
 def tokenize(x):
     context_tokenized = tokenizer(x['context'],  padding=True, truncation=True, return_tensors='pt')
@@ -128,6 +182,8 @@ def tokenize(x):
         "context": context_tokenized,
         "target": target_tokenized,
     }
+
+
     
 
 class CustomDataset(Dataset_torch):
@@ -168,13 +224,12 @@ if __name__ == "__main__":
 
     tokenizer = T5Tokenizer.from_pretrained(args.model_name)
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
-    model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
+    # model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
     # model.to(f'cuda:{model.device_ids[0]}')
-    # model.to(device)
+    model.to(device)
 
     print("Model on", device)
 
-    sep = tokenizer.eos_token
 
     my_special_tokens = {
         "additional_special_tokens": ["<MASK>"]
@@ -250,7 +305,20 @@ if __name__ == "__main__":
             'validation': tokenize(dataset['validation']),
             'test': tokenize(dataset['test'])
         })
-        
+    elif args.data == "gpt":
+        tokenizer = T5Tokenizer.from_pretrained(args.model_name)
+        my_special_tokens = {
+        "additional_special_tokens": ["<MASK>", "[DIALOG]", "[SRC]", "[TABLE]", "[PARAGRAPH]"] 
+        }
+
+        tokenizer.add_special_tokens(my_special_tokens)
+        dataset = process_dataset_gpt()
+        tokenized_dataset = DatasetDict({
+            'train': tokenize(dataset['train']), 
+            'validation': tokenize(dataset['validation']),
+            'test': tokenize(dataset['test'])
+        })
+
     
     print(tokenized_dataset)
 
@@ -281,9 +349,13 @@ if __name__ == "__main__":
             input_ids, attention_mask, labels, labels_attention_mask = batch
             labels_attention_mask = labels_attention_mask.type(torch.bool)
             labels_masked = torch.masked_fill(labels, ~labels_attention_mask, -100)
-            input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
-            attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
-            labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
+            # for multiple GPUs
+            # input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
+            # attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
+            # labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
+            input_ids = input_ids.to(device)
+            attention_mask = attention_mask.to(device)
+            labels_masked = labels_masked.to(device)
             output = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels_masked)
             optimizer.zero_grad()
             output.loss.mean().backward()
@@ -300,9 +372,13 @@ if __name__ == "__main__":
             input_ids, attention_mask, labels, labels_attention_mask = batch
             labels_attention_mask = labels_attention_mask.type(torch.bool)
             labels_masked = torch.masked_fill(labels, ~labels_attention_mask, -100)
-            input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
-            attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
-            labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
+            # for multiple GPUs
+            # input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
+            # attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
+            # labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
+            input_ids = input_ids.to(device)
+            attention_mask = attention_mask.to(device)
+            labels_masked = labels_masked.to(device)
             
             with torch.no_grad():
                 output = model(input_ids=input_ids, 
