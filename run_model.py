@@ -341,6 +341,7 @@ if __name__ == "__main__":
     early_stop_cnt = 0
     for epoch in range(num_epochs):
         if early_stop_cnt > 4:
+            print("EARLY STOPPED")
             break
         # training
         loss = 0
@@ -390,6 +391,7 @@ if __name__ == "__main__":
         avg_val_loss = loss / len(val_dataloader)
         print(f"Validation loss: {avg_val_loss}")
         if avg_val_loss < best_val_loss:
+            early_stop_cnt = 0
             print("Saving checkpoint!")
             best_val_loss = avg_val_loss
             torch.save({
