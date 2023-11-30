@@ -271,22 +271,6 @@ def tokenize(x):
         "target": target_tokenized,
     }
 
-
-def make_data_for_augment(enum):
-    result = []
-    tmp = "[DIALOG] "
-    n, dialog = enum
-    for i in range(len(dialog)//2):
-        target = dialog[2*i][2:]
-        tmp = tmp + " " + dialog[2*i][:2] + " [MASK] " + dialog[2*i+1]
-        tmp = tmp + " [SRC] " + srcs_test[n][i]
-        tmp = tmp + " [TABLE] " + tables_test[n]
-        tmp = tmp + " [PARAGRAPH] " + texts_test[n]
-        result.append(tmp)
-        tmp = tmp.replace("[MASK]", target)
-    return result
-    
-
 class CustomDataset(Dataset_torch):
     def __init__(self, data_dict):
         self.context = data_dict['context']
@@ -332,6 +316,9 @@ if __name__ == "__main__":
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     tokenizer = T5Tokenizer.from_pretrained(args.model_name)
+    my_special_tokens = {
+    "additional_special_tokens": ["[MASK]", "[DIALOG]", "[TABLE]", "[PARAGRAPH]"] 
+    }
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
     # model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
     # model.to(f'cuda:{model.device_ids[0]}')
@@ -352,16 +339,15 @@ if __name__ == "__main__":
     print("Model on", device)
 
 
-    my_special_tokens = {
-        "additional_special_tokens": ["[MASK]"]
-    }
 
     tokenizer.add_special_tokens(my_special_tokens)
 
-    taskmaster_dataset = load_dataset("taskmaster1", "one_person_dialogs")
-    qrecc_dataset = load_dataset("voidful/qrecc")
+
+    
 
     if args.data == "t":
+        taskmaster_dataset = load_dataset("taskmaster1", "one_person_dialogs")
+        qrecc_dataset = load_dataset("voidful/qrecc")
         dataset = process_dataset(taskmaster_dataset)
 
         ds = DatasetDict({
@@ -376,6 +362,8 @@ if __name__ == "__main__":
             'test': tokenize(ds['test'])
         })
     elif args.data == "qt":
+        taskmaster_dataset = load_dataset("taskmaster1", "one_person_dialogs")
+        qrecc_dataset = load_dataset("voidful/qrecc")
         dataset_tm = process_dataset(taskmaster_dataset)
         dataset_qrecc = process_dataset_qrecc(qrecc_dataset)
         dataset = {
@@ -400,6 +388,8 @@ if __name__ == "__main__":
         })
     
     elif args.data == "qot":
+        taskmaster_dataset = load_dataset("taskmaster1", "one_person_dialogs")
+        qrecc_dataset = load_dataset("voidful/qrecc")
         dataset_tm = process_dataset(taskmaster_dataset)
         dataset_qrecc = process_dataset_qrecc(qrecc_dataset)
         dataset_orquac = process_dataset_orquac()
@@ -427,12 +417,6 @@ if __name__ == "__main__":
             'test': tokenize(dataset['test'])
         })
     elif args.data == "gpt":
-        tokenizer = T5Tokenizer.from_pretrained(args.model_name)
-        my_special_tokens = {
-        "additional_special_tokens": ["[MASK]", "[DIALOG]", "[TABLE]", "[PARAGRAPH]"] 
-        }
-
-        tokenizer.add_special_tokens(my_special_tokens)
         with open("data/gpt/new_json.json", 'r') as f:
             gpt = json.load(f)
         qas = list(map(lambda x: x['qas'], gpt))
@@ -518,10 +502,7 @@ if __name__ == "__main__":
         })
 
     elif args.data == "hybrid":
-        tokenizer = T5Tokenizer.from_pretrained(args.model_name)
-        my_special_tokens = {
-        "additional_special_tokens": ["[MASK]", "[DIALOG]", "[TABLE]", "[PARAGRAPH]"] 
-        }
+
         dataset = process_dataset_hybrid()
         with open('data/hybrid_test.json', 'w') as f:
             json.dump(dataset, f)
@@ -633,10 +614,6 @@ if __name__ == "__main__":
     
         print(data_test[0])
         print(f"Data size for augmentation: {len(data_test)}")
-
-        res = list(map(make_data_for_augment, enumerate(data_test)))
-
-        res_flat = list(chain(*res))
 
         fname = f"results/aug_{args.checkpoint_name}.txt"
         

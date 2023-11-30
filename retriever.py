@@ -14,6 +14,7 @@ import numpy as np
 import os
 
 from tqdm import tqdm, trange
+from datetime import datetime
 
 seed = 2023
 
@@ -25,6 +26,21 @@ torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
 
+def generate_datetime_key():
+    """
+    Generate a key based on the current date and time.
+    """
+    now = datetime.now()
+    return now.strftime("%m%d%H%M")
+
+def create_run_directory(base_directory, key):
+    """
+    Create a directory based on the random key under the specified base directory.
+    """
+    run_directory = os.path.join(base_directory, key)
+    os.mkdir(run_directory) if not os.path.exists(run_directory) else None
+    return run_directory
+    
 def tokenize(x):
     context_tokenized = tokenizer(x['context'],  padding=True, truncation=True, max_length=512, return_tensors='pt')
     target_tokenized = tokenizer(x['target'], padding=True, truncation=True, max_length=512, return_tensors='pt')
@@ -49,6 +65,17 @@ class CustomDataset(Dataset):
 
         return context_input_ids, context_attention_mask, target_input_ids, target_attention_mask
     
+def flatten_table_hybrid(x):
+    title = x['section_title']
+    header = x['header']
+    header_flat = list(map(lambda y: y[0], header))
+    header_flat = " ".join(header_flat)
+    data = x['data']
+    data_flat = list(map(lambda z: list(map(lambda y: " ".join(y[:-1]), z)), data))
+    data_flat = list(map(lambda x: " ".join(x), data_flat))
+    data_flat = " ".join(data_flat)
+    result = title + " " + header_flat + " " + data_flat
+    return result
 
 def inference():
     model_q = AutoModel.from_pretrained('prajjwal1/bert-tiny')
@@ -102,7 +129,7 @@ def inference():
         
         recall_top1 = count_top1 / size
         recall_top5 = count_top5 / size
-        recall_top10 =count_top10 / size
+        recall_top10 = count_top10 / size
 
         print(f"R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
 
@@ -114,6 +141,11 @@ def inference():
 
 # Checkpoint directory
 os.mkdir("checkpoints") if not os.path.exists("checkpoints") else None
+base_directory = "checkpoints"
+random_key = generate_datetime_key()
+run_directory = create_run_directory(base_directory, random_key)
+print(f"Random Key: {random_key}")
+print(f"Run Directory: {run_directory}")
 # check GPU
 print('Cuda:', torch.cuda.is_available())
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -123,11 +155,20 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 with open("data/hybrid/experimental_data.json", 'r') as f:
     hybrid = json.load(f)
 
+with open("data/hybrid/traindev_tables.json", 'r') as f:
+    tables = json.load(f)
+
 convs = list(hybrid['conversations'].values())
 queries = list(map(lambda x: list(map(lambda y: hybrid['qas'][y]['current_query'], x)), convs))
 responses = list(map(lambda x: list(map(lambda y: hybrid['qas'][y]['long_response_to_query'], x)), convs))
 retrieved = list(map(lambda x: list(map(lambda y: hybrid['qas'][y]['correct_next_cands_ids'][0], x)), convs))
 retrieved_inputs = list(map(lambda x: list(map(lambda y: hybrid['all_candidates'][y]['linearized_input'], x)), retrieved))
+retrieved_keys = list(map(lambda x: list(map(lambda y: hybrid['all_candidates'][y]['table_key'], x)), retrieved))
+retrieved_keys_unique = list(map(lambda x: list(set(x)), retrieved_keys))
+retrieved_keys_unique = list(map(lambda x: list(filter(lambda y: y is not None, x)), retrieved_keys_unique))
+retrieved_keys_unique = list(map(lambda x: x[0], retrieved_keys_unique))
+tables_cands = list(map(lambda x: tables[x], retrieved_keys_unique))
+tables_flat = list(map(flatten_table_hybrid, tables_cands))
 output = []
 for x, i in enumerate(responses):
     tmp = []
@@ -139,9 +180,14 @@ for x, i in enumerate(responses):
 
 queries_flat = list(chain(*queries))
 output_flat = list(chain(*output))
-retrieved_inputs_flat = list(chain(*retrieved_inputs))
-retrieved_inputs_filtered = list(filter(lambda x: x[1:3] == 'TA' or x[1:3] == 'PA', retrieved_inputs_flat))
-output_filtered = [output_flat[i] for (i, x) in enumerate(retrieved_inputs_flat) if  x[1:3] == 'TA' or x[1:3] == 'PA']
+tables_flat = list(chain(*tables_flat))
+output_filtered = output_flat
+retrieved_inputs_filtered = list(chain(*retrieved_inputs))
+for i, inputs in enumerate(retrieved_inputs_filtered):
+    if inputs[1:3] == "TA" or inputs[1:3] == "RO" or inputs[1:3] == "CE":
+        retrieved_inputs_filtered[i] = tables_flat[i]
+# retrieved_inputs_filtered = list(filter(lambda x: x[1:3] == 'TA' or x[1:3] == 'PA', retrieved_inputs_flat))
+# output_filtered = [output_flat[i] for (i, x) in enumerate(retrieved_inputs_flat) if  x[1:3] == 'TA' or x[1:3] == 'PA']
 retrieved_inputs_filtered = list(map(lambda x: x.replace("$", "").strip(), retrieved_inputs_filtered))
 output_filtered_trn = output_filtered[:int(0.8*len(output_filtered))]
 retrieved_inputs_filtered_trn = retrieved_inputs_filtered[:int(0.8*len(output_filtered))]
@@ -153,13 +199,14 @@ data_dict_val = {'context': output_filtered_val, 'target': retrieved_inputs_filt
 with open('data/retrieve.json', 'w') as f:
     json.dump(data_dict_val, f)
 
+
 tokenizer = AutoTokenizer.from_pretrained('prajjwal1/bert-tiny')
 tokenized_ds_trn = tokenize(data_dict_trn)
 ds_trn = CustomDataset(tokenized_ds_trn)
 tokenized_ds_val = tokenize(data_dict_val)
 ds_val = CustomDataset(tokenized_ds_val)
 
-batch_size = 512
+batch_size = 256
 
 train_dataloader = DataLoader(ds_trn, batch_size=batch_size)
 val_dataloader = DataLoader(ds_val, batch_size=batch_size)
@@ -305,7 +352,7 @@ for epoch in range(1, 1001):
     recall_top1 /= len(val_dataloader)
     recall_top5 /= len(val_dataloader)
     recall_top10 /= len(val_dataloader)
-    print(f"epoch: {epoch}, loss:{loss_val}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
+    print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
 
 
 
@@ -316,7 +363,8 @@ for epoch in range(1, 1001):
                 'optimizer_state_dict': optim_q.state_dict(),
                 'val_loss': best_loss,
                 },
-                f"checkpoints/model_q_epoch_{epoch}.pt"
+                os.path.join(run_directory, f"model_q_epoch_{epoch}.pt")
+                
             )
         torch.save({
                 'epoch': epoch,
@@ -324,7 +372,7 @@ for epoch in range(1, 1001):
                 'optimizer_state_dict': optim_t.state_dict(),
                 'val_loss': best_loss,
                 },
-                f"checkpoints/model_t_epoch_{epoch}.pt"
+                os.path.join(run_directory, f"model_t_epoch_{epoch}.pt")
             )
     
         
