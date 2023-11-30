@@ -150,6 +150,9 @@ retrieved_inputs_filtered_val = retrieved_inputs_filtered[int(0.8*len(output_fil
 data_dict_trn = {'context': output_filtered_trn, 'target': retrieved_inputs_filtered_trn}
 data_dict_val = {'context': output_filtered_val, 'target': retrieved_inputs_filtered_val}
 
+with open('data/retrieve.json', 'w') as f:
+    json.dump(data_dict_val, f)
+
 tokenizer = AutoTokenizer.from_pretrained('prajjwal1/bert-tiny')
 tokenized_ds_trn = tokenize(data_dict_trn)
 ds_trn = CustomDataset(tokenized_ds_trn)
