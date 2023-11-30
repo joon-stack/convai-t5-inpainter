@@ -27,7 +27,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
-SPLIT_RATIO = [0.8, 0.1, 0.1]
+SPLIT_RATIO = [0.1, 0.1, 0.8]
 
 def generate_datetime_key():
     """
@@ -208,7 +208,7 @@ def process_dataset_hybrid():
             if src[1:3] == "TA" or src[1:3] == "RO" or src[1:3] == "CE":
                 inputs[j] = "[TABLE] " + tables_flat[i]
     
-    ratio = [0.4, 0.1, 0.5]
+    ratio = [0.8, 0.1, 0.1]
 
 
     combined_lists = list(zip(dialogs_merged, retrieved_inputs))
@@ -231,14 +231,23 @@ def process_dataset_hybrid():
         masked_dataset = {'context':[], 'target':[]}
         for i, dialog in enumerate(dialog_dict[sp]):
             dialog_length = len(dialog)
-            for masked_idx in range(dialog_length):
-            # masked_idx = np.random.randint(0, dialog_length)
+            if args.mask == 'random':
+            # for masked_idx in range(dialog_length):
+                masked_idx = np.random.randint(0, dialog_length)
                 masked_dataset['target'].append(dialog[masked_idx][3:])
                 src = inputs_dict[sp][i][masked_idx // 2]
                 dialog_copy = copy.copy(dialog)
                 dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
                 masked_dataset['context'].append(src.replace("$", "") + " [DIALOG] " + " ".join(dialog_copy))
-        dataset[sp] = masked_dataset
+            elif args.mask == 'all':
+                for masked_idx in range(dialog_length):
+                    masked_idx = np.random.randint(0, dialog_length)
+                    masked_dataset['target'].append(dialog[masked_idx][3:])
+                    src = inputs_dict[sp][i][masked_idx // 2]
+                    dialog_copy = copy.copy(dialog)
+                    dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
+                    masked_dataset['context'].append(src.replace("$", "") + " [DIALOG] " + " ".join(dialog_copy))
+            dataset[sp] = masked_dataset
     return dataset
 
 
@@ -300,7 +309,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=100, help="the number of epochs")
     parser.add_argument("--mode", type=str, default='train', help='whether to train or augment (inference)')
     parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
-
+    parser.add_argument("--mask", type=str, default='random', help="masking option, random: randomly mask one q or a, all: mask all")
     args = parser.parse_args()
 
     # Checkpoint directory
@@ -462,18 +471,29 @@ if __name__ == "__main__":
                 tmp = []
                 assert type(dialog) == type([])
                 dialog_length = len(dialog)
-                for masked_idx in range(dialog_length):
-                # masked_idx = np.random.randint(0, dialog_length)
+                if args.mask == 'all':
+                    for masked_idx in range(dialog_length):
+                        masked_dataset['target'].append(dialog[masked_idx][2:].strip())
+                        dialog_copy = copy.copy(dialog)
+                        dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
+                        source = srcs[sp][i][masked_idx // 2]
+                        if source == 'text':
+                            processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
+                            # processed_tmp = " [PARAGRAPH] " + texts[sp][i] + " [DIALOG] " + " ".join(dialog_copy) 
+                        elif source == 'table':
+                            processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
+                            # processed_tmp = " [TABLE] " + tables[sp][i] + " [DIALOG] " + " ".join(dialog_copy)
+                        masked_dataset['context'].append(processed_tmp)
+                elif args.mask == 'random':
+                    masked_idx = np.random.randint(0, dialog_length)
                     masked_dataset['target'].append(dialog[masked_idx][2:].strip())
                     dialog_copy = copy.copy(dialog)
                     dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
                     source = srcs[sp][i][masked_idx // 2]
                     if source == 'text':
-                        # processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
-                        processed_tmp = " [PARAGRAPH] " + texts[sp][i] + " [DIALOG] " + " ".join(dialog_copy) 
+                        processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
                     elif source == 'table':
-                        # processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
-                        processed_tmp = " [TABLE] " + tables[sp][i] + " [DIALOG] " + " ".join(dialog_copy)
+                        processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
                     masked_dataset['context'].append(processed_tmp)
                 dataset[sp] = masked_dataset
 
@@ -521,6 +541,8 @@ if __name__ == "__main__":
     print(f"Validation dataset size: {len(dataset_validation)}")
     print(f"Test dataset size: {len(dataset_test)}")
 
+    # print(list(map(lambda x: torch.unique(x[1], return_counts=True)[1][-1].item(), dataset_test)))
+
     mode = args.mode
     if mode == 'train':
 
@@ -544,7 +566,7 @@ if __name__ == "__main__":
         best_val_loss = float("inf")
         early_stop_cnt = 0
         for epoch in range(num_epochs):
-            if early_stop_cnt > 4:
+            if early_stop_cnt > 20:
                 print("EARLY STOPPED")
                 break
             # training
@@ -604,7 +626,7 @@ if __name__ == "__main__":
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': best_val_loss,
                     },
-                    os.path.join(run_directory, f"epoch_{epoch}.pt")
+                    os.path.join(run_directory, f"model.pt")
                 )
             else:
                 early_stop_cnt += 1
@@ -622,6 +644,7 @@ if __name__ == "__main__":
             model.eval()
             for n, data in enumerate(data_test):
                 tmp = ""
+                sources = []
                 for i in range(len(data) // 2):
                     tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
                     # print(tmp)
@@ -637,13 +660,18 @@ if __name__ == "__main__":
                     decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
                     tmp = tmp.replace("[MASK]", decoded_pred)
                     tmp = tmp.strip()
+                    sources.append(source)
+                    sources.append(source)
                 decoded_context_lines = re.split(r'[01]:', tmp)[1:]
                 cnt = 0
                 f.write("PREDICTION\n")
-                for line in decoded_context_lines:
+                for i, line in enumerate(decoded_context_lines):
                     if line != "":
-                        f.write(str(cnt%2)+ ":" + line + "\n")
-                        cnt += 1
+                        try:
+                            f.write(sources[cnt] + " " + str(cnt%2)+ ":" + line + "\n")
+                            cnt += 1
+                        except:
+                            f.write(str(cnt%2)+ ":" + line + "\n")
                 f.write("=============================" + "\n")
                 f.write("GROUND TRUTH\n")
                 cnt = 0

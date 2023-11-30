@@ -178,17 +178,18 @@ for x, i in enumerate(responses):
     output.append(tmp)
 
 
-queries_flat = list(chain(*queries))
-output_flat = list(chain(*output))
-tables_flat = list(chain(*tables_flat))
-output_filtered = output_flat
-retrieved_inputs_filtered = list(chain(*retrieved_inputs))
-for i, inputs in enumerate(retrieved_inputs_filtered):
-    if inputs[1:3] == "TA" or inputs[1:3] == "RO" or inputs[1:3] == "CE":
-        retrieved_inputs_filtered[i] = tables_flat[i]
+
+# output_filtered = output_flat
+# retrieved_inputs_filtered = list(chain(*retrieved_inputs))
+for i, inputs in enumerate(retrieved_inputs):
+        for j, src in enumerate(inputs):
+            if src[1:3] == "TA" or src[1:3] == "RO" or src[1:3] == "CE":
+                inputs[j] = "[TABLE] " + tables_flat[i]
 # retrieved_inputs_filtered = list(filter(lambda x: x[1:3] == 'TA' or x[1:3] == 'PA', retrieved_inputs_flat))
 # output_filtered = [output_flat[i] for (i, x) in enumerate(retrieved_inputs_flat) if  x[1:3] == 'TA' or x[1:3] == 'PA']
-retrieved_inputs_filtered = list(map(lambda x: x.replace("$", "").strip(), retrieved_inputs_filtered))
+queries_filtered = list(chain(*queries))
+output_filtered = list(chain(*output))
+retrieved_inputs_filtered = list(chain(*retrieved_inputs))
 output_filtered_trn = output_filtered[:int(0.8*len(output_filtered))]
 retrieved_inputs_filtered_trn = retrieved_inputs_filtered[:int(0.8*len(output_filtered))]
 output_filtered_val = output_filtered[int(0.8*len(output_filtered)):]
