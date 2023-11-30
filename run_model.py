@@ -17,6 +17,7 @@ import re
 from collections import OrderedDict
 import copy
 from datetime import datetime
+import gc
 
 seed = 2023
 
@@ -311,6 +312,10 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
     parser.add_argument("--mask", type=str, default='random', help="masking option, random: randomly mask one q or a, all: mask all")
     args = parser.parse_args()
+
+    
+    torch.cuda.empty_cache()
+    gc.collect()
 
     # Checkpoint directory
     if args.mode == 'train':
