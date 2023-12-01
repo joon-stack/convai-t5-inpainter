@@ -106,12 +106,12 @@ if __name__ == "__main__":
     tokenizer = T5Tokenizer.from_pretrained(args.model_name)
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
     
-    model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
+    # model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
     if args.checkpoint_name != None:
         model.load_state_dict(torch.load("checkpoints/"+args.checkpoint_name)['model_state_dict'])
         print("Model load success from ", "checkpoints/"+args.checkpoint_name)
     
-    model.to(f'cuda:{model.device_ids[0]}')
+    model.to(device)
 
     print("Model on", device)
 
@@ -147,10 +147,14 @@ if __name__ == "__main__":
             input_ids, attention_mask, labels, labels_attention_mask = batch
             labels_attention_mask = labels_attention_mask.type(torch.bool)
             labels_masked = torch.masked_fill(labels, ~labels_attention_mask, -100)
-            input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
-            attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
-            labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
-            outputs = model.module.generate(input_ids, max_new_tokens=100)
+            # input_ids = input_ids.to(f'cuda:{model.device_ids[0]}')
+            # attention_mask = attention_mask.to(f'cuda:{model.device_ids[0]}')
+            # labels_masked = labels_masked.to(f'cuda:{model.device_ids[0]}')
+            input_ids = input_ids.to(device)
+            attention_mask = attention_mask.to(device)
+            labels_masked = labels_masked.to(device)
+            # outputs = model.module.generate(input_ids, max_new_tokens=100)
+            outputs = model.generate(input_ids, max_new_tokens=100)
             decoded_context = list(map(lambda x: tokenizer.decode(x, skip_special_tokens=True), input_ids))
             decoded_pred = list(map(lambda x: tokenizer.decode(x, skip_special_tokens=True), outputs))
             decoded_label = list(map(lambda x: tokenizer.decode(x, skip_special_tokens=True), labels))
