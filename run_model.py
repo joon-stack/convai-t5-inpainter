@@ -239,7 +239,7 @@ def process_dataset_hybrid():
                 src = inputs_dict[sp][i][masked_idx // 2]
                 dialog_copy = copy.copy(dialog)
                 dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
-                masked_dataset['context'].append(src.replace("$", "") + " [DIALOG] " + " ".join(dialog_copy))
+                masked_dataset['context'].append("[DIALOG] " + " ".join(dialog_copy)+ src.replace("$", "") )
             elif args.mask == 'all':
                 for masked_idx in range(dialog_length):
                     masked_idx = np.random.randint(0, dialog_length)
@@ -247,7 +247,7 @@ def process_dataset_hybrid():
                     src = inputs_dict[sp][i][masked_idx // 2]
                     dialog_copy = copy.copy(dialog)
                     dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
-                    masked_dataset['context'].append(src.replace("$", "") + " [DIALOG] " + " ".join(dialog_copy))
+                    masked_dataset['context'].append("[DIALOG] " + " ".join(dialog_copy) + src.replace("$", "") )
             dataset[sp] = masked_dataset
     return dataset
 
@@ -302,7 +302,7 @@ class CustomDataset(Dataset_torch):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=str, default='t', help="t for taskmaster (will be updated for qrecc and or-quac)")
+    parser.add_argument("--data", type=str, default='t', help="t: taskmaster, qt: qrecc + taskmaster, qot: qrecc + orquac + taskmaster, gpt: gpt-made, hybrid: hybridialgoue, hybridgpt: hybrid + gpt")
     parser.add_argument("--batch_size", type=int, default=16, help="batch size")
     parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="weight decaying rate")
@@ -312,6 +312,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
     parser.add_argument("--mask", type=str, default='random', help="masking option, random: randomly mask one q or a, all: mask all")
     parser.add_argument("--early_stop", type=int, default=5, help="epochs to early stop")
+    parser.add_argument("--aug_mode", type=str, default='retrieve', help="purpose of augmentation. retrieve: for retrieval (no details), eval: for evaluation (with details)")
     args = parser.parse_args()
 
     
@@ -616,6 +617,7 @@ if __name__ == "__main__":
         with open('data/hybridgpt_test.json', 'w') as f:
             json.dump(dataset, f)
 
+
     dataset_train = CustomDataset(tokenized_dataset['train'])
     dataset_validation = CustomDataset(tokenized_dataset['validation'])
     dataset_test = CustomDataset(tokenized_dataset['test'])
@@ -720,46 +722,73 @@ if __name__ == "__main__":
         print(data_test[0])
         print(f"Data size for augmentation: {len(data_test)}")
 
-        fname = f"results/aug_{args.checkpoint_name}.txt"
+        fname = f"results/aug_{args.checkpoint_name}.txt" if args.aug_mode == 'eval' else f"data/retrieval/aug_{args.checkpoint_name}.json"
         
         model.to(device)
-        with open(fname, 'w') as f:
-            model.eval()
-            for n, data in enumerate(data_test):
-                tmp = ""
-                sources = []
-                for i in range(len(data) // 2):
-                    tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
-                    # print(tmp)
-                    # tmp_add = tmp + " [SRC] " + srcs_test[n][i]
-                    source = srcs_test[n][i]
-                    if source == 'table':
-                        tmp_add = tmp + " [TABLE] " + tables_test[n]
-                    elif source == 'text':
-                        tmp_add = tmp + " [PARAGRAPH] " + texts_test[n]
-                    tok = tokenizer(tmp_add.strip(), truncation=True, return_tensors='pt')
-                    input_ids = tok['input_ids'].to(device)
-                    outputs = model.generate(input_ids, max_new_tokens=100)
-                    decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
-                    tmp = tmp.replace("[MASK]", decoded_pred)
-                    tmp = tmp.strip()
-                    sources.append(source)
-                    sources.append(source)
-                decoded_context_lines = re.split(r'[01]:', tmp)[1:]
-                cnt = 0
-                f.write("PREDICTION\n")
-                for i, line in enumerate(decoded_context_lines):
-                    if line != "":
-                        try:
-                            f.write(sources[cnt] + " " + str(cnt%2)+ ":" + line + "\n")
+        
+        model.eval()
+
+        retrieval_dataset = {'context': [], 'target': []}
+        for n, data in enumerate(data_test):
+            tmp = ""
+            sources = []
+            
+            for i in range(len(data) // 2):
+                tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
+                # print(tmp)
+                # tmp_add = tmp + " [SRC] " + srcs_test[n][i]
+                source = srcs_test[n][i]
+                if source == 'table':
+                    tmp_add = tmp + " [TABLE] " + tables_test[n]
+                elif source == 'text':
+                    tmp_add = tmp + " [PARAGRAPH] " + texts_test[n]
+                tok = tokenizer(tmp_add.strip(), truncation=True, return_tensors='pt')
+                input_ids = tok['input_ids'].to(device)
+                outputs = model.generate(input_ids, max_new_tokens=100)
+                decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
+                tmp = tmp.replace("[MASK]", decoded_pred)
+                tmp = tmp.strip()
+                sources.append(source)
+                sources.append(source)
+            decoded_context_lines = re.split(r'[01]:', tmp)[1:]
+            cnt = 0
+            if args.aug_mode == 'eval':
+                with open(fname, 'w') as f:
+                    f.write("PREDICTION\n")
+                    for i, line in enumerate(decoded_context_lines):
+                        if line != "":
+                            try:
+                                f.write(sources[cnt] + " " + str(cnt%2)+ ":" + line + "\n")
+                                cnt += 1
+                            except:
+                                f.write(str(cnt%2)+ ":" + line + "\n")
+                    f.write("=============================" + "\n")
+                    f.write("GROUND TRUTH\n")
+                    cnt = 0
+                    for line in data:
+                        if line != "":
+                            f.write(line + "\n")
                             cnt += 1
-                        except:
-                            f.write(str(cnt%2)+ ":" + line + "\n")
-                f.write("=============================" + "\n")
-                f.write("GROUND TRUTH\n")
-                cnt = 0
-                for line in data:
-                    if line != "":
-                        f.write(line + "\n")
-                        cnt += 1
-                f.write("=============================" + "\n")
+                    f.write("=============================" + "\n")
+            elif args.aug_mode == 'retrieve':
+                dialog = []
+                chat_mask = ""
+                chat_full = ""
+                with open(fname, 'w') as f:
+                    for i, line in enumerate(decoded_context_lines):
+                        if line != "":
+                            tmp_mask = str(cnt%2)+ ": " + line.strip() + " " if cnt%2 == 0 else str(cnt%2) + ": [MASK]"
+                            tmp_full = str(cnt%2)+ ": " + line.strip() + " "
+                            chat_mask = chat_full + tmp_mask
+                            chat_full += tmp_full
+                            
+                            if cnt%2 == 1:
+                                retrieval_dataset['context'].append(chat_mask)
+                                src = "[TABLE] " + tables_test[n] if sources[i] == 'table' else "[PARAGRAPH] " + texts_test[n]
+                                retrieval_dataset['target'].append(src)
+
+                            cnt += 1
+                    json.dump(retrieval_dataset, f)
+
+
+                
