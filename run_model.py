@@ -28,14 +28,14 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
-SPLIT_RATIO = [0.1, 0.1, 0.8]
+SPLIT_RATIO = [0.8, 0.1, 0.1]
 
 def generate_datetime_key():
     """
     Generate a key based on the current date and time.
     """
     now = datetime.now()
-    return now.strftime("%m%d%H%M")
+    return now.strftime("%m%d%H%M%S")
 
 def create_run_directory(base_directory, key):
     """
@@ -255,21 +255,21 @@ def process_dataset_hybrid():
 
 def flatten_table(x):
     title = x['title']
-    header = " ".join(x['header'])
-    data = list(map(lambda x: " ".join(x), x['data']))
-    data = " ".join(data)
-    return title + " " + header + " " + data
+    header = " ; ".join(x['header'])
+    data = list(map(lambda x: " ; ".join(x), x['data']))
+    data = " / ".join(data)
+    return title + " / " + header + " / " + data
 
 def flatten_table_hybrid(x):
     title = x['section_title']
     header = x['header']
     header_flat = list(map(lambda y: y[0], header))
-    header_flat = " ".join(header_flat)
+    header_flat = " ; ".join(header_flat)
     data = x['data']
     data_flat = list(map(lambda z: list(map(lambda y: " ".join(y[:-1]), z)), data))
-    data_flat = list(map(lambda x: " ".join(x), data_flat))
-    data_flat = " ".join(data_flat)
-    result = title + " " + header_flat + " " + data_flat
+    data_flat = list(map(lambda x: " ; ".join(x), data_flat))
+    data_flat = " / ".join(data_flat)
+    result = title + " / " + header_flat + " / " + data_flat
     return result
 
 
@@ -332,7 +332,7 @@ if __name__ == "__main__":
 
     tokenizer = T5Tokenizer.from_pretrained(args.model_name)
     my_special_tokens = {
-    "additional_special_tokens": ["[MASK]", "[DIALOG]", "[TABLE]", "[PARAGRAPH]"] 
+    "additional_special_tokens": ["[MASK]", "[DIALOG]", "[TABLE]", "[PARAGRAPH]", ';', '/'] 
     }
     model = T5ForConditionalGeneration.from_pretrained(args.model_name)
     # model = nn.DataParallel(model, device_ids = [0, 1, 2, 3])
@@ -431,6 +431,7 @@ if __name__ == "__main__":
             'validation': tokenize(dataset['validation']),
             'test': tokenize(dataset['test'])
         })
+
     elif args.data == "gpt":
         with open("data/gpt/new_json.json", 'r') as f:
             gpt = json.load(f)
@@ -507,20 +508,6 @@ if __name__ == "__main__":
         with open('data/gpt_test.json', 'w') as f:
             json.dump(dataset, f)
 
-
-        # add orquac to the training
-        # dataset_orquac = process_dataset_orquac_2()
-        # with open('data/orquac_test.json', 'w') as f:
-        #     json.dump(dataset_orquac, f)
-
-        # for sp in ['train', 'validation', 'test']:
-        #     try:
-        #         dataset[sp]['target'].extend(dataset_orquac[sp]['target'])
-        #         dataset[sp]['context'].extend(dataset_orquac[sp]['context'])
-                
-        #     except:
-        #         continue
-
         tokenized_dataset = DatasetDict({
             'train': tokenize(dataset['train']), 
             'validation': tokenize(dataset['validation']),
@@ -531,14 +518,104 @@ if __name__ == "__main__":
 
         dataset = process_dataset_hybrid()
         with open('data/hybrid_test.json', 'w') as f:
-            json.dump(dataset, f)
+            json.dump(dataset['validation'], f)
         tokenized_dataset = DatasetDict({
             'train': tokenize(dataset['train']), 
             'validation': tokenize(dataset['validation']),
             'test': tokenize(dataset['test'])
         })
     
-    # print(tokenized_dataset)
+    elif args.data == "hybridgpt":
+        with open("data/gpt/new_json.json", 'r') as f:
+            gpt = json.load(f)
+        qas = list(map(lambda x: x['qas'], gpt))
+        texts = list(map(lambda x: x['text'], gpt))
+        tables = list(map(lambda x: x['table'], gpt))
+        tables_flat = list(map(flatten_table, tables))
+        questions = list(map(lambda y: list(map(lambda x: x['question'], y)), qas))
+        answers = list(map(lambda y: list(map(lambda x: x['answer'], y)), qas))
+        srcs = list(map(lambda y: list(map(lambda x: x['src'], y)), qas))
+        qa_pairs = list(map(lambda x: {"questions": questions[x], "answers": answers[x]}, list(range(len(questions)))))
+        result = list(map(lambda x: list(chain.from_iterable(zip(x["questions"], x["answers"]))), qa_pairs))
+        result_prefix = list(map(lambda x: list(map(add_prefix, enumerate(x))), result))
+
+        combined_lists = list(zip(result_prefix, srcs, tables_flat, texts))
+        random.shuffle(combined_lists)
+        result_prefix, srcs, tables_flat, texts = zip(*combined_lists)
+
+
+        size = len(result_prefix)
+        data_train = result_prefix[:int(SPLIT_RATIO[0]*size)]
+        data_val = result_prefix[int(SPLIT_RATIO[0]*size):int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size)]
+        data_test = result_prefix[int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size):]
+        srcs_train = srcs[:int(SPLIT_RATIO[0]*size)]
+        srcs_val = srcs[int(SPLIT_RATIO[0]*size):int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size)]
+        srcs_test = srcs[int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size):]
+        tables_train = tables_flat[:int(SPLIT_RATIO[0]*size)]
+        tables_val = tables_flat[int(SPLIT_RATIO[0]*size):int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size)]
+        tables_test = tables_flat[int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size):]
+        texts_train = texts[:int(SPLIT_RATIO[0]*size)]
+        texts_val = texts[int(SPLIT_RATIO[0]*size):int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size)]
+        texts_test = texts[int(SPLIT_RATIO[1]*size + SPLIT_RATIO[0]*size):]
+        print(data_test[0])
+
+        data = {'train': data_train, 'validation': data_val, 'test': data_test}
+        srcs = {'train': srcs_train, 'validation': srcs_val, 'test': srcs_test}
+        tables = {'train': tables_train, 'validation': tables_val, 'test': tables_test}
+        texts = {'train': texts_train, 'validation': texts_val, 'test': texts_test}
+
+        dataset = {}
+        for sp in ['train', 'validation', 'test']:
+            masked_dataset = {'context':[], 'target':[]}
+            for i, dialog in enumerate(data[sp]):
+                tmp = []
+                assert type(dialog) == type([])
+                dialog_length = len(dialog)
+                if args.mask == 'all':
+                    for masked_idx in range(dialog_length):
+                        masked_dataset['target'].append(dialog[masked_idx][2:].strip())
+                        dialog_copy = copy.copy(dialog)
+                        dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
+                        source = srcs[sp][i][masked_idx // 2]
+                        if source == 'text':
+                            processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
+                            # processed_tmp = " [PARAGRAPH] " + texts[sp][i] + " [DIALOG] " + " ".join(dialog_copy) 
+                        elif source == 'table':
+                            processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
+                            # processed_tmp = " [TABLE] " + tables[sp][i] + " [DIALOG] " + " ".join(dialog_copy)
+                        masked_dataset['context'].append(processed_tmp)
+                elif args.mask == 'random':
+                    masked_idx = np.random.randint(0, dialog_length)
+                    masked_dataset['target'].append(dialog[masked_idx][2:].strip())
+                    dialog_copy = copy.copy(dialog)
+                    dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
+                    source = srcs[sp][i][masked_idx // 2]
+                    if source == 'text':
+                        processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
+                    elif source == 'table':
+                        processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
+                    masked_dataset['context'].append(processed_tmp)
+                dataset[sp] = masked_dataset
+        
+        dataset_hy = process_dataset_hybrid()
+
+        for sp in ['train', 'validation', 'test']:
+            try:
+                dataset[sp]['target'].extend(dataset_hy[sp]['target'])
+                dataset[sp]['context'].extend(dataset_hy[sp]['context'])
+                
+            except:
+                continue
+
+        tokenized_dataset = DatasetDict({
+            'train': tokenize(dataset['train']), 
+            'validation': tokenize(dataset['validation']),
+            'test': tokenize(dataset['test'])
+        })
+
+        with open('data/hybridgpt_test.json', 'w') as f:
+            json.dump(dataset, f)
+
     dataset_train = CustomDataset(tokenized_dataset['train'])
     dataset_validation = CustomDataset(tokenized_dataset['validation'])
     dataset_test = CustomDataset(tokenized_dataset['test'])
@@ -686,4 +763,3 @@ if __name__ == "__main__":
                         f.write(line + "\n")
                         cnt += 1
                 f.write("=============================" + "\n")
-                
