@@ -28,7 +28,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
-SPLIT_RATIO = [0.8, 0.1, 0.1]
+SPLIT_RATIO = [0.4, 0.1, 0.5]
 
 def generate_datetime_key():
     """
@@ -745,6 +745,7 @@ if __name__ == "__main__":
     
         print(data_test[0])
         print(f"Data size for augmentation: {len(data_test)}")
+        print(len(tables_test), len(texts_test))
 
         fname = f"results/aug_{args.checkpoint_name}.txt" if args.aug_mode == 'eval' else f"data/retrieval/aug_{args.checkpoint_name}.json"
         
@@ -774,7 +775,8 @@ if __name__ == "__main__":
                     tmp = tmp.strip()
                     sources.append(source)
                     sources.append(source)
-                decoded_context_lines = re.split(r'[01]:', tmp)[1:]
+                decoded_context_lines = re.split(r'[01]: ', tmp)[1:]
+
                 cnt = 0
                 if args.aug_mode == 'eval':
                     
@@ -808,9 +810,14 @@ if __name__ == "__main__":
                             chat_full += tmp_full
                             
                             if cnt%2 == 1:
-                                retrieval_dataset['context'].append(chat_mask)
-                                src = "[TABLE] " + tables_test[n] if sources[i] == 'table' else "[PARAGRAPH] " + texts_test[n]
-                                retrieval_dataset['target'].append(src)
+                                try:
+                                
+                                # print(f'i: {i}, n: {n}')
+                                    retrieval_dataset['context'].append(chat_mask)
+                                    src = "[TABLE] " + tables_test[n] if sources[i] == 'table' else "[PARAGRAPH] " + texts_test[n]
+                                    retrieval_dataset['target'].append(src)
+                                except:
+                                    pass
 
                             cnt += 1
             if args.aug_mode == 'retrieve':

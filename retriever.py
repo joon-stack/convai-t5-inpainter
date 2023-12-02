@@ -342,7 +342,7 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     early_stop_cnt = 0
 
-    for epoch in range(1, 301):
+    for epoch in range(1, 501):
         if early_stop_cnt > 300:
             break
             print("Early Stopped")
@@ -469,7 +469,7 @@ if __name__ == "__main__":
         recall_top1 /= len(val_dataloader)
         recall_top5 /= len(val_dataloader)
         recall_top10 /= len(val_dataloader)
-        if epoch % 50 == 0:
+        if epoch % 100 == 0:
             print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
 
 
