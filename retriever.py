@@ -366,7 +366,7 @@ if __name__ == "__main__":
     early_stop_cnt = 0
 
     for epoch in range(1, 501):
-        if early_stop_cnt > 300:
+        if early_stop_cnt > 500:
             break
             print("Early Stopped")
         
