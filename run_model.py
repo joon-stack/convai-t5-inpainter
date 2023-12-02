@@ -752,76 +752,77 @@ if __name__ == "__main__":
         model.to(device)
         
         model.eval()
+        with torch.no_grad():
 
-        retrieval_dataset = {'context': [], 'target': []}
-        with open(fname, 'w') as f:
-            for n, data in enumerate(data_test):
-                tmp = ""
-                sources = []
-                for i in range(len(data) // 2):
-                    tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
-                    # print(tmp)
-                    # tmp_add = tmp + " [SRC] " + srcs_test[n][i]
-                    source = srcs_test[n][i]
-                    if source == 'table':
-                        tmp_add = tmp + " [TABLE] " + tables_test[n]
-                    elif source == 'text':
-                        tmp_add = tmp + " [PARAGRAPH] " + texts_test[n]
-                    tok = tokenizer(tmp_add.strip(), truncation=True, return_tensors='pt')
-                    input_ids = tok['input_ids'].to(device)
-                    outputs = model.generate(input_ids, max_new_tokens=100)
-                    decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
-                    tmp = tmp.replace("[MASK]", decoded_pred)
-                    tmp = tmp.strip()
-                    sources.append(source)
-                    sources.append(source)
-                decoded_context_lines = re.split(r'[01]: ', tmp)[1:]
+            retrieval_dataset = {'context': [], 'target': []}
+            with open(fname, 'w') as f:
+                for n, data in enumerate(data_test):
+                    tmp = ""
+                    sources = []
+                    for i in range(len(data) // 2):
+                        tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
+                        # print(tmp)
+                        # tmp_add = tmp + " [SRC] " + srcs_test[n][i]
+                        source = srcs_test[n][i]
+                        if source == 'table':
+                            tmp_add = tmp + " [TABLE] " + tables_test[n]
+                        elif source == 'text':
+                            tmp_add = tmp + " [PARAGRAPH] " + texts_test[n]
+                        tok = tokenizer(tmp_add.strip(), truncation=True, return_tensors='pt')
+                        input_ids = tok['input_ids'].to(device)
+                        outputs = model.generate(input_ids, max_new_tokens=100)
+                        decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
+                        tmp = tmp.replace("[MASK]", decoded_pred)
+                        tmp = tmp.strip()
+                        sources.append(source)
+                        sources.append(source)
+                    decoded_context_lines = re.split(r'[01]: ', tmp)[1:]
 
-                cnt = 0
-                if args.aug_mode == 'eval':
-                    
-                    f.write("PREDICTION\n")
-                    for i, line in enumerate(decoded_context_lines):
-                        if line != "":
-                            try:
-                                f.write(sources[cnt] + " " + str(cnt%2)+ ":" + line + "\n")
-                                cnt += 1
-                            except:
-                                f.write(str(cnt%2)+ ":" + line + "\n")
-                    f.write("=============================" + "\n")
-                    f.write("GROUND TRUTH\n")
                     cnt = 0
-                    for line in data:
-                        if line != "":
-                            f.write(line + "\n")
-                            cnt += 1
-                    f.write("=============================" + "\n")
-                
-                elif args.aug_mode == 'retrieve':
-                    dialog = []
-                    chat_mask = ""
-                    chat_full = ""
-                    
-                    for i, line in enumerate(decoded_context_lines):
-                        if line != "":
-                            tmp_mask = str(cnt%2)+ ": " + line.strip() + " " if cnt%2 == 0 else str(cnt%2) + ": [MASK]"
-                            tmp_full = str(cnt%2)+ ": " + line.strip() + " "
-                            chat_mask = chat_full + tmp_mask
-                            chat_full += tmp_full
-                            
-                            if cnt%2 == 1:
+                    if args.aug_mode == 'eval':
+                        
+                        f.write("PREDICTION\n")
+                        for i, line in enumerate(decoded_context_lines):
+                            if line != "":
                                 try:
-                                
-                                # print(f'i: {i}, n: {n}')
-                                    retrieval_dataset['context'].append(chat_mask)
-                                    src = "[TABLE] " + tables_test[n] if sources[i] == 'table' else "[PARAGRAPH] " + texts_test[n]
-                                    retrieval_dataset['target'].append(src)
+                                    f.write(sources[cnt] + " " + str(cnt%2)+ ":" + line + "\n")
+                                    cnt += 1
                                 except:
-                                    pass
+                                    f.write(str(cnt%2)+ ":" + line + "\n")
+                        f.write("=============================" + "\n")
+                        f.write("GROUND TRUTH\n")
+                        cnt = 0
+                        for line in data:
+                            if line != "":
+                                f.write(line + "\n")
+                                cnt += 1
+                        f.write("=============================" + "\n")
+                    
+                    elif args.aug_mode == 'retrieve':
+                        dialog = []
+                        chat_mask = ""
+                        chat_full = ""
+                        
+                        for i, line in enumerate(decoded_context_lines):
+                            if line != "":
+                                tmp_mask = str(cnt%2)+ ": " + line.strip() + " " if cnt%2 == 0 else str(cnt%2) + ": [MASK]"
+                                tmp_full = str(cnt%2)+ ": " + line.strip() + " "
+                                chat_mask = chat_full + tmp_mask
+                                chat_full += tmp_full
+                                
+                                if cnt%2 == 1:
+                                    try:
+                                    
+                                    # print(f'i: {i}, n: {n}')
+                                        retrieval_dataset['context'].append(chat_mask)
+                                        src = "[TABLE] " + tables_test[n] if sources[i] == 'table' else "[PARAGRAPH] " + texts_test[n]
+                                        retrieval_dataset['target'].append(src)
+                                    except:
+                                        pass
 
-                            cnt += 1
-            if args.aug_mode == 'retrieve':
-                json.dump(retrieval_dataset, f)
+                                cnt += 1
+                if args.aug_mode == 'retrieve':
+                    json.dump(retrieval_dataset, f)
 
 
                 

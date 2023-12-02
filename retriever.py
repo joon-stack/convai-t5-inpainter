@@ -344,8 +344,7 @@ if __name__ == "__main__":
     batch_size = 256
 
     train_dataloader = DataLoader(ds_trn, batch_size=batch_size)
-    val_dataloader = DataLoader(ds_val, batch_size=batch_size)
-    inf_dataloader = DataLoader(ds_val, batch_size=len(ds_val))
+    val_dataloader = DataLoader(ds_val, batch_size=len(ds_val))
 
 
     model_q = AutoModel.from_pretrained('prajjwal1/bert-tiny')
@@ -377,8 +376,7 @@ if __name__ == "__main__":
         model_q.train()
         model_t.train()
 
-        model_q.eval()
-        model_t.eval()
+        
         recall_top1 = 0
         recall_top5 = 0
         recall_top10 = 0
@@ -424,103 +422,103 @@ if __name__ == "__main__":
         loss_batch /= batch_size
         # print(f"Epoch {epoch}: {loss_batch:.4f}")
 
-        for batch in val_dataloader:
-            input_ids_q, attention_mask_q,  input_ids_t, attention_mask_t = batch
-            input_ids_q = input_ids_q.to('cuda:0')
-            attention_mask_q = attention_mask_q.to('cuda:0')
-            input_ids_t = input_ids_t.to('cuda:0')
-            attention_mask_t = attention_mask_t.to('cuda:0')
+        model_q.eval()
+        model_t.eval()
+        with torch.no_grad():
+            for batch in val_dataloader:
+                input_ids_q, attention_mask_q,  input_ids_t, attention_mask_t = batch
+                input_ids_q = input_ids_q.to('cuda:0')
+                attention_mask_q = attention_mask_q.to('cuda:0')
+                input_ids_t = input_ids_t.to('cuda:0')
+                attention_mask_t = attention_mask_t.to('cuda:0')
 
-            optim_q.zero_grad()
-            optim_t.zero_grad()
+                # B*512 shape
+                h_t = model_t(
+                    input_ids=input_ids_t,
+                    attention_mask=attention_mask_t,
+                ).pooler_output
 
-            # B*512 shape
-            h_t = model_t(
-                input_ids=input_ids_t,
-                attention_mask=attention_mask_t,
-            ).pooler_output
-
-            # B*512 shape
-            h_q = model_q(
-                input_ids=input_ids_q,
-                attention_mask=attention_mask_q
-            ).pooler_output
-
-
-            # B*B shape
-            logits = torch.softmax(h_q @ h_t.T, dim=1)
-            # for multiple GPUs
-            # labels = torch.eye(logits.shape[0]).to(f'cuda:{model_q.device_ids[0]}')
-            labels = torch.eye(logits.shape[0]).to(f'cuda:0')
-            loss = criterion(logits, labels)
-            loss_val += loss.mean().item()
-
-            size = len(input_ids_q)
-            retrieved_top1 = torch.topk(logits, 1)
-
-            retrieved_top5 = torch.topk(logits, 5)
-            retrieved_top10 = torch.topk(logits, 10)
+                # B*512 shape
+                h_q = model_q(
+                    input_ids=input_ids_q,
+                    attention_mask=attention_mask_q
+                ).pooler_output
 
 
+                # B*B shape
+                logits = torch.softmax(h_q @ h_t.T, dim=1)
+                # for multiple GPUs
+                # labels = torch.eye(logits.shape[0]).to(f'cuda:{model_q.device_ids[0]}')
+                labels = torch.eye(logits.shape[0]).to(f'cuda:0')
+                loss = criterion(logits, labels)
+                loss_val += loss.mean().item()
 
-            count_top1 = 0
-            count_top5 = 0
-            count_top10 = 0
+                size = len(input_ids_q)
+                retrieved_top1 = torch.topk(logits, 1)
 
-            for i, row in enumerate(retrieved_top1.indices):
-                if i in row:
-                    count_top1 += 1
-            
-            for i, row in enumerate(retrieved_top5.indices):
-                if i in row:
-                    count_top5 += 1
+                retrieved_top5 = torch.topk(logits, 5)
+                retrieved_top10 = torch.topk(logits, 10)
 
-            for i, row in enumerate(retrieved_top10.indices):
-                if i in row:
-                    count_top10 += 1
-            
-            recall_top1 += count_top1 / size
-            recall_top5 += count_top5 / size
-            recall_top10 += count_top10 / size
 
-        
+
+                count_top1 = 0
+                count_top5 = 0
+                count_top10 = 0
+
+                for i, row in enumerate(retrieved_top1.indices):
+                    if i in row:
+                        count_top1 += 1
+                
+                for i, row in enumerate(retrieved_top5.indices):
+                    if i in row:
+                        count_top5 += 1
+
+                for i, row in enumerate(retrieved_top10.indices):
+                    if i in row:
+                        count_top10 += 1
+                
+                recall_top1 += count_top1 / size
+                recall_top5 += count_top5 / size
+                recall_top10 += count_top10 / size
 
             
 
-
-            
-        loss_val /= len(val_dataloader)
-        recall_top1 /= len(val_dataloader)
-        recall_top5 /= len(val_dataloader)
-        recall_top10 /= len(val_dataloader)
-        if epoch % 100 == 0:
-            print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
+                
 
 
+                
+            loss_val /= len(val_dataloader)
+            recall_top1 /= len(val_dataloader)
+            recall_top5 /= len(val_dataloader)
+            recall_top10 /= len(val_dataloader)
+            if epoch % 100 == 0:
+                print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
 
-        if loss_val < best_loss:
-            best_loss = loss_val
-            early_stop_cnt = 0
-            # print("Checkpoint saved")
-            torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model_q.state_dict(),
-                    'optimizer_state_dict': optim_q.state_dict(),
-                    'val_loss': best_loss,
-                    },
-                    os.path.join(run_directory, f"model_q.pt")
-                    
-                )
-            torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model_t.state_dict(),
-                    'optimizer_state_dict': optim_t.state_dict(),
-                    'val_loss': best_loss,
-                    },
-                    os.path.join(run_directory, f"model_t.pt")
-                )
-        else:
-            early_stop_cnt += 1
+
+
+            if loss_val < best_loss:
+                best_loss = loss_val
+                early_stop_cnt = 0
+                # print("Checkpoint saved")
+                torch.save({
+                        'epoch': epoch,
+                        'model_state_dict': model_q.state_dict(),
+                        'optimizer_state_dict': optim_q.state_dict(),
+                        'val_loss': best_loss,
+                        },
+                        os.path.join(run_directory, f"model_q.pt")
+                        
+                    )
+                torch.save({
+                        'epoch': epoch,
+                        'model_state_dict': model_t.state_dict(),
+                        'optimizer_state_dict': optim_t.state_dict(),
+                        'val_loss': best_loss,
+                        },
+                        os.path.join(run_directory, f"model_t.pt")
+                    )
+            else:
+                early_stop_cnt += 1
         
             
     
