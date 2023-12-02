@@ -28,7 +28,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
-SPLIT_RATIO = [0.8, 0.1, 0.1]
+SPLIT_RATIO = [0.4, 0.1, 0.5]
 
 def generate_datetime_key():
     """
@@ -209,7 +209,7 @@ def process_dataset_hybrid():
             if src[1:3] == "TA" or src[1:3] == "RO" or src[1:3] == "CE":
                 inputs[j] = "[TABLE] " + tables_flat[i]
     
-    ratio = [0.8, 0.1, 0.1]
+    ratio = [0.4, 0.1, 0.5]
 
 
     combined_lists = list(zip(dialogs_merged, retrieved_inputs))
@@ -729,31 +729,31 @@ if __name__ == "__main__":
         model.eval()
 
         retrieval_dataset = {'context': [], 'target': []}
-        for n, data in enumerate(data_test):
-            tmp = ""
-            sources = []
-            
-            for i in range(len(data) // 2):
-                tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
-                # print(tmp)
-                # tmp_add = tmp + " [SRC] " + srcs_test[n][i]
-                source = srcs_test[n][i]
-                if source == 'table':
-                    tmp_add = tmp + " [TABLE] " + tables_test[n]
-                elif source == 'text':
-                    tmp_add = tmp + " [PARAGRAPH] " + texts_test[n]
-                tok = tokenizer(tmp_add.strip(), truncation=True, return_tensors='pt')
-                input_ids = tok['input_ids'].to(device)
-                outputs = model.generate(input_ids, max_new_tokens=100)
-                decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
-                tmp = tmp.replace("[MASK]", decoded_pred)
-                tmp = tmp.strip()
-                sources.append(source)
-                sources.append(source)
-            decoded_context_lines = re.split(r'[01]:', tmp)[1:]
-            cnt = 0
-            if args.aug_mode == 'eval':
-                with open(fname, 'w') as f:
+        with open(fname, 'w') as f:
+            for n, data in enumerate(data_test):
+                tmp = ""
+                sources = []
+                for i in range(len(data) // 2):
+                    tmp = tmp + " " + data[2*i][:2] + " [MASK] "  + data[2*i+1] 
+                    # print(tmp)
+                    # tmp_add = tmp + " [SRC] " + srcs_test[n][i]
+                    source = srcs_test[n][i]
+                    if source == 'table':
+                        tmp_add = tmp + " [TABLE] " + tables_test[n]
+                    elif source == 'text':
+                        tmp_add = tmp + " [PARAGRAPH] " + texts_test[n]
+                    tok = tokenizer(tmp_add.strip(), truncation=True, return_tensors='pt')
+                    input_ids = tok['input_ids'].to(device)
+                    outputs = model.generate(input_ids, max_new_tokens=100)
+                    decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)     
+                    tmp = tmp.replace("[MASK]", decoded_pred)
+                    tmp = tmp.strip()
+                    sources.append(source)
+                    sources.append(source)
+                decoded_context_lines = re.split(r'[01]:', tmp)[1:]
+                cnt = 0
+                if args.aug_mode == 'eval':
+                    
                     f.write("PREDICTION\n")
                     for i, line in enumerate(decoded_context_lines):
                         if line != "":
@@ -770,11 +770,12 @@ if __name__ == "__main__":
                             f.write(line + "\n")
                             cnt += 1
                     f.write("=============================" + "\n")
-            elif args.aug_mode == 'retrieve':
-                dialog = []
-                chat_mask = ""
-                chat_full = ""
-                with open(fname, 'w') as f:
+                
+                elif args.aug_mode == 'retrieve':
+                    dialog = []
+                    chat_mask = ""
+                    chat_full = ""
+                    
                     for i, line in enumerate(decoded_context_lines):
                         if line != "":
                             tmp_mask = str(cnt%2)+ ": " + line.strip() + " " if cnt%2 == 0 else str(cnt%2) + ": [MASK]"

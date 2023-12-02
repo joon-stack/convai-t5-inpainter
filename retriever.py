@@ -66,7 +66,14 @@ class CustomDataset(Dataset):
         target_attention_mask = self.target['attention_mask'][idx]
 
         return context_input_ids, context_attention_mask, target_input_ids, target_attention_mask
-    
+
+def flatten_table(x):
+    title = x['title']
+    header = " ; ".join(x['header'])
+    data = list(map(lambda x: " ; ".join(x), x['data']))
+    data = " / ".join(data)
+    return title + " / " + header + " / " + data
+
 def flatten_table_hybrid(x):
     title = x['section_title']
     header = x['header']
@@ -137,6 +144,37 @@ def inference():
 
 
 
+def process_dataset_gpt_for_retrieval():
+    with open("data/gpt/new_json.json", 'r') as f:
+        gpt = json.load(f)
+    qas = list(map(lambda x: x['qas'], gpt))
+    texts = list(map(lambda x: x['text'], gpt))
+    tables = list(map(lambda x: x['table'], gpt))
+    tables_flat = list(map(flatten_table, tables))
+    questions = list(map(lambda y: list(map(lambda x: x['question'], y)), qas))
+    answers = list(map(lambda y: list(map(lambda x: x['answer'], y)), qas))
+    srcs = list(map(lambda y: list(map(lambda x: x['src'], y)), qas))
+
+    context = []
+    target = []
+    for i, x in enumerate(questions):
+        tmp = []
+        tmp.append("0: " + questions[i][0] + " 1: [MASK]")
+        for j in range(1, len(x)):
+            tmp.append(tmp[j-1][:-6] + answers[i][j-1] + " 0: " + questions[i][j] + " 1: [MASK]")
+        context.append(tmp)
+        for src in srcs[i]:
+            if src == 'table':
+                target.append('[TABLE] ' + tables_flat[i])
+            elif src == 'text':
+                target.append('[PARAGRAPH] ' + texts[i])
+                
+    context = list(chain(*context))
+
+    dataset = {'context': context, 'target': target}
+
+    return dataset
+
 
 
     
@@ -147,6 +185,7 @@ def inference():
 
 
 if __name__ == "__main__":
+    process_dataset_gpt_for_retrieval()
     parser = argparse.ArgumentParser()
     parser.add_argument("--augment_name", type=str, default=None, help="the name of augmented dataset, None: no augment")
     args = parser.parse_args()
@@ -161,16 +200,26 @@ if __name__ == "__main__":
     print('Cuda:', torch.cuda.is_available())
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
+    # load augmented data
+    if args.augment_name:
+        if args.augment_name == 'gpt':
+            augment = process_dataset_gpt_for_retrieval()
+            with open("data/retrieval/aug_qot.pt.json", 'r') as f:
+                augment_test = json.load(f) 
+        else:
+            with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
+                augment = json.load(f)
+    else:
+        augment = {'context':[], 'target':[]}
+
+    # load hybridialogue data
     with open("data/hybrid/experimental_data.json", 'r') as f:
         hybrid = json.load(f)
 
     with open("data/hybrid/traindev_tables.json", 'r') as f:
         tables = json.load(f)
 
-    if args.augment_name:
-        with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
-            augment = json.load(f)
-
+    
     convs = list(hybrid['conversations'].values())
     queries = list(map(lambda x: list(map(lambda y: hybrid['qas'][y]['current_query'], x)), convs))
     responses = list(map(lambda x: list(map(lambda y: hybrid['qas'][y]['long_response_to_query'], x)), convs))
@@ -210,13 +259,16 @@ if __name__ == "__main__":
     output_filtered = list(output_filtered)
     retrieved_inputs_filtered = list(retrieved_inputs_filtered)
     
-    trim_size = 500
-    augment_size = len(augment['context'])
+    
+    augment_size = min(len(augment['context']), len(augment_test['context']))
+    trim_size = augment_size
     print(f"total data size without augmentation: {len(output_filtered)}")
     output_selected = output_filtered[:trim_size]
     retrieved_inputs_selected = retrieved_inputs_filtered[:trim_size]
-    output_filtered_trn = output_selected[:len(output_selected)] + augment['context'][:int(0.8*augment_size)]
-    retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)] + augment['target'][:int(0.8*augment_size)]
+
+
+    output_filtered_trn = output_selected[:len(output_selected)] + augment['context']
+    retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)] + augment['target']
 
     combined_lists = list(zip(output_filtered_trn, retrieved_inputs_filtered_trn))
     random.shuffle(combined_lists)
@@ -225,8 +277,8 @@ if __name__ == "__main__":
     output_filtered_trn = list(output_filtered_trn)
     retrieved_inputs_filtered_trn = list(retrieved_inputs_filtered_trn)
 
-    output_filtered_val = output_filtered[len(output_selected):len(output_selected)+trim_size]  + augment['context'][int(0.8*augment_size):]
-    retrieved_inputs_filtered_val = retrieved_inputs_filtered[len(output_selected):len(output_selected)+trim_size] + augment['target'][int(0.8*augment_size):]
+    output_filtered_val = output_filtered[len(output_selected):len(output_selected)+trim_size] 
+    retrieved_inputs_filtered_val = retrieved_inputs_filtered[len(output_selected):len(output_selected)+trim_size] 
 
     combined_lists = list(zip(output_filtered_val, retrieved_inputs_filtered_val))
     random.shuffle(combined_lists)
@@ -235,8 +287,9 @@ if __name__ == "__main__":
     output_filtered_val = list(output_filtered_val)
     retrieved_inputs_filtered_val = list(retrieved_inputs_filtered_val)
 
-    print(f"training data size: {len(output_filtered_trn)}")
     print(f"augmented data size: {augment_size}" )
+    print(f"training data size: {len(output_filtered_trn)}")
+    
     print(f"validation data size: {len(output_filtered_val)}")
 
     data_dict_trn = {'context': output_filtered_trn, 'target': retrieved_inputs_filtered_trn}
@@ -273,17 +326,18 @@ if __name__ == "__main__":
     model_q.to('cuda:0')
     model_t.to('cuda:0')
 
-
+    best_loss = np.inf
     criterion = nn.CrossEntropyLoss()
     early_stop_cnt = 0
-    for epoch in range(1, 1001):
-        if early_stop_cnt > 5:
+
+    for epoch in range(1, 201):
+        if early_stop_cnt > 200:
             break
             print("Early Stopped")
         
         loss_batch = 0
         loss_val = 0
-        best_loss = np.inf
+        
         model_q.train()
         model_t.train()
 
@@ -403,11 +457,15 @@ if __name__ == "__main__":
         recall_top1 /= len(val_dataloader)
         recall_top5 /= len(val_dataloader)
         recall_top10 /= len(val_dataloader)
-        print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
+        if epoch % 50 == 0:
+            print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
 
 
 
         if loss_val < best_loss:
+            best_loss = loss_val
+            early_stop_cnt = 0
+            # print("Checkpoint saved")
             torch.save({
                     'epoch': epoch,
                     'model_state_dict': model_q.state_dict(),
