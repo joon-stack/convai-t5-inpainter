@@ -526,11 +526,20 @@ if __name__ == "__main__":
         dataset = process_dataset_hybrid()
         with open('data/hybrid_test.json', 'w') as f:
             json.dump(dataset['validation'], f)
-        tokenized_dataset = DatasetDict({
-            'train': tokenize(dataset['train']), 
-            'validation': tokenize(dataset['validation']),
-            'test': tokenize(dataset['test'])
-        })
+
+        try:
+
+            tokenized_dataset = DatasetDict({
+                'train': tokenize(dataset['train']), 
+                'validation': tokenize(dataset['validation']),
+                # 'test': tokenize(dataset['test'])
+            })
+        except:
+            tokenized_dataset = DatasetDict({
+                'train': tokenize(dataset['train']), 
+                'validation': tokenize(dataset['validation']),
+                'test': tokenize(dataset['test'])
+            })
     
     elif args.data == "hybridgpt":
         with open("data/gpt/new_json.json", 'r') as f:
@@ -629,11 +638,17 @@ if __name__ == "__main__":
 
     dataset_train = CustomDataset(tokenized_dataset['train'])
     dataset_validation = CustomDataset(tokenized_dataset['validation'])
-    dataset_test = CustomDataset(tokenized_dataset['test'])
+    
 
     print(f"Train dataset size: {len(dataset_train)}")
     print(f"Validation dataset size: {len(dataset_validation)}")
-    print(f"Test dataset size: {len(dataset_test)}")
+
+    try:
+        dataset_test = CustomDataset(tokenized_dataset['test'])
+        print(f"Test dataset size: {len(dataset_test)}")
+    except:
+        pass
+    
 
     # print(list(map(lambda x: torch.unique(x[1], return_counts=True)[1][-1].item(), dataset_test)))
 
