@@ -2,7 +2,7 @@ import json
 
 from itertools import chain
 
-from transformers import TapasConfig, TapasForQuestionAnswering, AdamW, TapasTokenizer, BertTokenizer, AutoTokenizer, AutoModel
+from transformers import AdamW, BertTokenizer, AutoTokenizer, AutoModel
 import torch
 import torch.nn as nn
 
@@ -188,6 +188,7 @@ if __name__ == "__main__":
     process_dataset_gpt_for_retrieval()
     parser = argparse.ArgumentParser()
     parser.add_argument("--augment_name", type=str, default=None, help="the name of augmented dataset, None: no augment")
+    parser.add_argument("--mode", type=str, default='add', help='the type of experiment, add: add augmented dataset to hybridialogue, solo_hy: use only hybrid, solo_gpt: use only gpt-aug, solo_inp: use only inpainter-aug')
     args = parser.parse_args()
 
     os.mkdir("checkpoints") if not os.path.exists("checkpoints") else None
@@ -201,14 +202,25 @@ if __name__ == "__main__":
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     # load augmented data
-    if args.augment_name:
-        if args.augment_name == 'gpt':
-            augment = process_dataset_gpt_for_retrieval()
+    if args.mode == 'add':
+        if args.augment_name:
+            if args.augment_name == 'gpt':
+                augment = process_dataset_gpt_for_retrieval()
+            else:
+                with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
+                    augment = json.load(f)
         else:
-            with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
-                augment = json.load(f)
-    else:
+            augment = {'context':[], 'target':[]}
+    elif args.mode == 'solo_hy':
         augment = {'context':[], 'target':[]}
+    elif args.mode == 'solo_gpt':
+        augment = process_dataset_gpt_for_retrieval()
+    elif args.mode == 'solo_inp':
+        with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
+            augment = json.load(f)
+
+
+    
         
     with open("data/retrieval/aug_qot.pt.json", 'r') as f:
         augment_test = json.load(f)
@@ -261,7 +273,7 @@ if __name__ == "__main__":
     
 
     trim_size = len(augment_test['context'])
-    augment_size = 0 if args.augment_name == None else trim_size
+    augment_size = 0 if args.augment_name == None and args.mode == 'add' else trim_size
     print(f"total data size without augmentation: {len(output_filtered)}")
     output_selected = output_filtered[:trim_size]
     retrieved_inputs_selected = retrieved_inputs_filtered[:trim_size]
@@ -279,8 +291,20 @@ if __name__ == "__main__":
     aug_context_trim = aug_context[:trim_size] if augment_size > 0 else []
     aug_target_trim = aug_target[:trim_size] if augment_size > 0 else []
 
-    output_filtered_trn = output_selected[:len(output_selected)] + aug_context_trim
-    retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)] + aug_target_trim
+    if args.mode == 'add':
+
+        output_filtered_trn = output_selected[:len(output_selected)] + aug_context_trim
+        retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)] + aug_target_trim
+
+    elif args.mode == 'solo_hy':
+
+        output_filtered_trn = output_selected[:len(output_selected)]
+        retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)]
+
+    elif args.mode == 'solo_gpt' or 'solo_inp':
+        output_filtered_trn = aug_context_trim
+        retrieved_inputs_filtered_trn = aug_target_trim
+
 
     combined_lists = list(zip(output_filtered_trn, retrieved_inputs_filtered_trn))
     random.shuffle(combined_lists)
