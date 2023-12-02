@@ -209,13 +209,15 @@ def process_dataset_hybrid():
             if src[1:3] == "TA" or src[1:3] == "RO" or src[1:3] == "CE":
                 inputs[j] = "[TABLE] " + tables_flat[i]
     
-    ratio = [0.4, 0.1, 0.5]
+    ratio = [0.8, 0.2, 0.0]
 
 
     combined_lists = list(zip(dialogs_merged, retrieved_inputs))
     random.shuffle(combined_lists)
     dialogs_merged, retrieved_inputs = zip(*combined_lists)
     size = len(dialogs_merged)
+    test_dialog =  dialogs_merged[int((ratio[0] + ratio[1]) * size):] if ratio[2] == 0.0 else None
+    test_inputs =  retrieved_inputs[int((ratio[0] + ratio[1]) * size):] if ratio[2] == 0.0 else None
     dialog_dict = {
                     'train': dialogs_merged[:int(ratio[0] * size)],
                     'validation': dialogs_merged[int(ratio[0] * size):int((ratio[0] + ratio[1]) * size)],
@@ -230,25 +232,28 @@ def process_dataset_hybrid():
 
     for sp in ['train', 'validation', 'test']:
         masked_dataset = {'context':[], 'target':[]}
-        for i, dialog in enumerate(dialog_dict[sp]):
-            dialog_length = len(dialog)
-            if args.mask == 'random':
-            # for masked_idx in range(dialog_length):
-                masked_idx = np.random.randint(0, dialog_length)
-                masked_dataset['target'].append(dialog[masked_idx][3:])
-                src = inputs_dict[sp][i][masked_idx // 2]
-                dialog_copy = copy.copy(dialog)
-                dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
-                masked_dataset['context'].append("[DIALOG] " + " ".join(dialog_copy)+ src.replace("$", "") )
-            elif args.mask == 'all':
-                for masked_idx in range(dialog_length):
+        try:
+            for i, dialog in enumerate(dialog_dict[sp]):
+                dialog_length = len(dialog)
+                if args.mask == 'random':
+                # for masked_idx in range(dialog_length):
                     masked_idx = np.random.randint(0, dialog_length)
                     masked_dataset['target'].append(dialog[masked_idx][3:])
                     src = inputs_dict[sp][i][masked_idx // 2]
                     dialog_copy = copy.copy(dialog)
                     dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
-                    masked_dataset['context'].append("[DIALOG] " + " ".join(dialog_copy) + src.replace("$", "") )
-            dataset[sp] = masked_dataset
+                    masked_dataset['context'].append("[DIALOG] " + " ".join(dialog_copy)+ src.replace("$", "") )
+                elif args.mask == 'all':
+                    for masked_idx in range(dialog_length):
+                        masked_idx = np.random.randint(0, dialog_length)
+                        masked_dataset['target'].append(dialog[masked_idx][3:])
+                        src = inputs_dict[sp][i][masked_idx // 2]
+                        dialog_copy = copy.copy(dialog)
+                        dialog_copy[masked_idx] = dialog[masked_idx][:3] + "[MASK]"
+                        masked_dataset['context'].append("[DIALOG] " + " ".join(dialog_copy) + src.replace("$", "") )
+                dataset[sp] = masked_dataset
+        except:
+            continue
     return dataset
 
 
@@ -310,7 +315,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=100, help="the number of epochs")
     parser.add_argument("--mode", type=str, default='train', help='whether to train or augment (inference)')
     parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
-    parser.add_argument("--mask", type=str, default='random', help="masking option, random: randomly mask one q or a, all: mask all")
+    parser.add_argument("--mask", type=str, default='random', help="hybrid masking option, random: randomly mask one q or a, all: mask all")
+    parser.add_argument("--mask_gpt", type=str, default='random', help="gpt masking option, random: randomly mask one q or a, all: mask all")
     parser.add_argument("--early_stop", type=int, default=5, help="epochs to early stop")
     parser.add_argument("--aug_mode", type=str, default='retrieve', help="purpose of augmentation. retrieve: for retrieval (no details), eval: for evaluation (with details)")
     args = parser.parse_args()
@@ -479,7 +485,7 @@ if __name__ == "__main__":
                 tmp = []
                 assert type(dialog) == type([])
                 dialog_length = len(dialog)
-                if args.mask == 'all':
+                if args.mask_gpt == 'all':
                     for masked_idx in range(dialog_length):
                         masked_dataset['target'].append(dialog[masked_idx][2:].strip())
                         dialog_copy = copy.copy(dialog)
@@ -492,7 +498,7 @@ if __name__ == "__main__":
                             processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
                             # processed_tmp = " [TABLE] " + tables[sp][i] + " [DIALOG] " + " ".join(dialog_copy)
                         masked_dataset['context'].append(processed_tmp)
-                elif args.mask == 'random':
+                elif args.mask_gpt == 'random':
                     masked_idx = np.random.randint(0, dialog_length)
                     masked_dataset['target'].append(dialog[masked_idx][2:].strip())
                     dialog_copy = copy.copy(dialog)
@@ -568,35 +574,38 @@ if __name__ == "__main__":
         dataset = {}
         for sp in ['train', 'validation', 'test']:
             masked_dataset = {'context':[], 'target':[]}
-            for i, dialog in enumerate(data[sp]):
-                tmp = []
-                assert type(dialog) == type([])
-                dialog_length = len(dialog)
-                if args.mask == 'all':
-                    for masked_idx in range(dialog_length):
+            try:
+                for i, dialog in enumerate(data[sp]):
+                    tmp = []
+                    assert type(dialog) == type([])
+                    dialog_length = len(dialog)
+                    if args.mask_gpt == 'all':
+                        for masked_idx in range(dialog_length):
+                            masked_dataset['target'].append(dialog[masked_idx][2:].strip())
+                            dialog_copy = copy.copy(dialog)
+                            dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
+                            source = srcs[sp][i][masked_idx // 2]
+                            if source == 'text':
+                                processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
+                                # processed_tmp = " [PARAGRAPH] " + texts[sp][i] + " [DIALOG] " + " ".join(dialog_copy) 
+                            elif source == 'table':
+                                processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
+                                # processed_tmp = " [TABLE] " + tables[sp][i] + " [DIALOG] " + " ".join(dialog_copy)
+                            masked_dataset['context'].append(processed_tmp)
+                    elif args.mask_gpt == 'random':
+                        masked_idx = np.random.randint(0, dialog_length)
                         masked_dataset['target'].append(dialog[masked_idx][2:].strip())
                         dialog_copy = copy.copy(dialog)
                         dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
                         source = srcs[sp][i][masked_idx // 2]
                         if source == 'text':
                             processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
-                            # processed_tmp = " [PARAGRAPH] " + texts[sp][i] + " [DIALOG] " + " ".join(dialog_copy) 
                         elif source == 'table':
                             processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
-                            # processed_tmp = " [TABLE] " + tables[sp][i] + " [DIALOG] " + " ".join(dialog_copy)
                         masked_dataset['context'].append(processed_tmp)
-                elif args.mask == 'random':
-                    masked_idx = np.random.randint(0, dialog_length)
-                    masked_dataset['target'].append(dialog[masked_idx][2:].strip())
-                    dialog_copy = copy.copy(dialog)
-                    dialog_copy[masked_idx] = dialog[masked_idx][:2] + " [MASK]"
-                    source = srcs[sp][i][masked_idx // 2]
-                    if source == 'text':
-                        processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [PARAGRAPH] " + texts[sp][i]
-                    elif source == 'table':
-                        processed_tmp = "[DIALOG] " + " ".join(dialog_copy) + " [TABLE] " + tables[sp][i] 
-                    masked_dataset['context'].append(processed_tmp)
-                dataset[sp] = masked_dataset
+                    dataset[sp] = masked_dataset
+            except:
+                continue
         
         dataset_hy = process_dataset_hybrid()
 
