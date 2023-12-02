@@ -28,7 +28,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 print('pwd', os.getcwd())
 
-SPLIT_RATIO = [0.4, 0.1, 0.5]
+SPLIT_RATIO = [0.8, 0.1, 0.1]
 
 def generate_datetime_key():
     """
@@ -813,7 +813,8 @@ if __name__ == "__main__":
                                 retrieval_dataset['target'].append(src)
 
                             cnt += 1
-                    json.dump(retrieval_dataset, f)
+            if args.aug_mode == 'retrieve':
+                json.dump(retrieval_dataset, f)
 
 
                 
