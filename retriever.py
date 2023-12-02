@@ -204,14 +204,14 @@ if __name__ == "__main__":
     if args.augment_name:
         if args.augment_name == 'gpt':
             augment = process_dataset_gpt_for_retrieval()
-            with open("data/retrieval/aug_qot.pt.json", 'r') as f:
-                augment_test = json.load(f) 
         else:
             with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
                 augment = json.load(f)
     else:
         augment = {'context':[], 'target':[]}
-
+        
+    with open("data/retrieval/aug_qot.pt.json", 'r') as f:
+        augment_test = json.load(f)
     # load hybridialogue data
     with open("data/hybrid/experimental_data.json", 'r') as f:
         hybrid = json.load(f)
@@ -259,16 +259,28 @@ if __name__ == "__main__":
     output_filtered = list(output_filtered)
     retrieved_inputs_filtered = list(retrieved_inputs_filtered)
     
-    
-    augment_size = min(len(augment['context']), len(augment_test['context']))
-    trim_size = augment_size
+
+    trim_size = len(augment_test['context'])
+    augment_size = 0 if args.augment_name == None else trim_size
     print(f"total data size without augmentation: {len(output_filtered)}")
     output_selected = output_filtered[:trim_size]
     retrieved_inputs_selected = retrieved_inputs_filtered[:trim_size]
 
+    if augment_size > 0:
+        aug_context = augment['context']
+        aug_target = augment['target']
 
-    output_filtered_trn = output_selected[:len(output_selected)] + augment['context']
-    retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)] + augment['target']
+        combined_lists = list(zip(aug_context, aug_target))
+        random.shuffle(combined_lists)
+        aug_context, aug_target = zip(*combined_lists)
+        aug_context = list(aug_context)
+        aug_target = list(aug_target)
+
+    aug_context_trim = aug_context[:trim_size] if augment_size > 0 else []
+    aug_target_trim = aug_target[:trim_size] if augment_size > 0 else []
+
+    output_filtered_trn = output_selected[:len(output_selected)] + aug_context_trim
+    retrieved_inputs_filtered_trn = retrieved_inputs_selected[:len(output_selected)] + aug_target_trim
 
     combined_lists = list(zip(output_filtered_trn, retrieved_inputs_filtered_trn))
     random.shuffle(combined_lists)
@@ -314,8 +326,8 @@ if __name__ == "__main__":
 
     model_q = AutoModel.from_pretrained('prajjwal1/bert-tiny')
     model_t = AutoModel.from_pretrained('prajjwal1/bert-tiny')
-    optim_q = AdamW(model_q.parameters(), lr=5e-5)
-    optim_t = AdamW(model_t.parameters(), lr=5e-5)
+    optim_q = AdamW(model_q.parameters(), lr=1e-4)
+    optim_t = AdamW(model_t.parameters(), lr=1e-4)
 
     # for multiple GPUs
     # model_q = nn.DataParallel(model_q, device_ids = [0, 1, 2, 3])
@@ -330,8 +342,8 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     early_stop_cnt = 0
 
-    for epoch in range(1, 201):
-        if early_stop_cnt > 200:
+    for epoch in range(1, 301):
+        if early_stop_cnt > 300:
             break
             print("Early Stopped")
         
