@@ -273,7 +273,7 @@ if __name__ == "__main__":
     
 
     trim_size = len(augment_test['context'])
-    augment_size = 0 if args.augment_name == None and args.mode == 'add' else trim_size
+    augment_size = 0 if (args.augment_name == None and args.mode == 'add') or args.mode == 'solo_hy' else trim_size
     print(f"total data size without augmentation: {len(output_filtered)}")
     output_selected = output_filtered[:trim_size]
     retrieved_inputs_selected = retrieved_inputs_filtered[:trim_size]
