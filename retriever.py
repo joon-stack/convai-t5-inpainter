@@ -206,18 +206,24 @@ if __name__ == "__main__":
         if args.augment_name:
             if args.augment_name == 'gpt':
                 augment = process_dataset_gpt_for_retrieval()
+                print(f"data/retrieval/{args.augment_name}.json loaded")
             else:
                 with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
                     augment = json.load(f)
+                    print(f"data/retrieval/{args.augment_name}.json loaded")
         else:
             augment = {'context':[], 'target':[]}
+            print(f"no augmented data loaded")
     elif args.mode == 'solo_hy':
         augment = {'context':[], 'target':[]}
+        print(f"no augmented data loaded")
     elif args.mode == 'solo_gpt':
         augment = process_dataset_gpt_for_retrieval()
+        print(f"data/retrieval/{args.augment_name}.json loaded")
     elif args.mode == 'solo_inp':
         with open(f"data/retrieval/{args.augment_name}.json", 'r') as f:
             augment = json.load(f)
+            print(f"data/retrieval/{args.augment_name}.json loaded")
 
 
     
