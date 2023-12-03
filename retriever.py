@@ -497,7 +497,7 @@ if __name__ == "__main__":
             recall_top1 /= len(val_dataloader)
             recall_top5 /= len(val_dataloader)
             recall_top10 /= len(val_dataloader)
-            if epoch % 100 == 0:
+            if epoch % 50 == 0:
                 print(f"epoch: {epoch}, loss:{loss_val:.4f}, R@1: {recall_top1:.3f}, R@5: {recall_top5:.3f}, R@10: {recall_top10:.3f}")
 
 
