@@ -313,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.01, help="weight decaying rate")
     parser.add_argument("--model_name", type=str, default="t5-small", help="the model name, default: t5-small")
     parser.add_argument("--epochs", type=int, default=100, help="the number of epochs")
-    parser.add_argument("--mode", type=str, default='train', help='whether to train or augment (inference)')
+    parser.add_argument("--mode", type=str, default='train', help='whether to train or augment (inference), or augment_test')
     parser.add_argument("--checkpoint_name", type=str, help="checkpoint name, if this is None, the t5-small checkpoint is utilized for inference")
     parser.add_argument("--mask", type=str, default='random', help="hybrid masking option, random: randomly mask one q or a, all: mask all")
     parser.add_argument("--mask_gpt", type=str, default='random', help="gpt masking option, random: randomly mask one q or a, all: mask all")
@@ -356,6 +356,8 @@ if __name__ == "__main__":
         model.load_state_dict(new_dict)
         # model.load_state_dict(torch.load("checkpoints/"+args.checkpoint_name)['model_state_dict'])
         print("Model load success from ", "checkpoints/"+args.checkpoint_name)
+    
+    
     model.to(device)
 
     print("Model on", device)
@@ -648,11 +650,27 @@ if __name__ == "__main__":
         print(f"Test dataset size: {len(dataset_test)}")
     except:
         pass
-    
-
-    # print(list(map(lambda x: torch.unique(x[1], return_counts=True)[1][-1].item(), dataset_test)))
 
     mode = args.mode
+
+    if args.mode == 'augment_test':
+        # paragraph = "[PARAGRAPH] Traffic is a 2000 American movie crime drama film directed by Steven Soderbergh and written by Stephen Gaghan . It explores the illegal drug trade from a number of perspectives : users , enforcers , politicians , and traffickers . Their stories are edited together throughout the film , although some of the characters do not meet each other . The film is an adaptation of the 1989 British Channel 4 television series Traffik . 20th Century Fox , the original financiers of the film , demanded that Harrison Ford play a leading role and that significant changes to the screenplay be made . Soderbergh refused and proposed the script to other major Hollywood studios , but it was rejected because of the three-hour running time and the subject matter - Traffic is more of a political film than most Hollywood productions . USA Films , however , liked the project from the start and offered the filmmakers more money than Fox . Soderbergh operated the camera himself and adopted a distinctive color grade for each storyline so that audiences could tell them apart . Traffic was critically acclaimed and earned numerous awards , including four Oscars : Best Director for Steven Soderbergh , Best Supporting Actor for Benicio del Toro , Best Adapted Screenplay for Stephen Gaghan and Best Film Editing for Stephen Mirrione . It was also a commercial success with a worldwide box-office revenue total of $ 207.5 million , well above its estimated $ 46 million budget . In 2004 , USA Network ran a miniseries - also called Traffic - based on this film and the 1989 British television series ."
+        # data_test = ["0: [MASK] 1: Yes", "0: Who is the voice of the character who played the role of the 'Giant Mechanical Man' in the movie Traffic? 1: Topher Grace 0: What year did Topher Grace play the role of the 'Giant Mechanical Man' in the movie Traffic? 1: 2000 0: Who directed the movie Traffic? 1: Steven Soderbergh 0: [MASK] 1: Yes ", "[DIALOG] 0: [MASK] 1: Yes " + paragraph, "[DIALOG] 0: Who is the voice of the character who played the role of the 'Giant Mechanical Man' in the movie Traffic? 1: Topher Grace 0: What year did Topher Grace play the role of the 'Giant Mechanical Man' in the movie Traffic? 1: 2000 0: Who directed the movie Traffic? 1: Steven Soderbergh 0: [MASK] 1: Yes " + paragraph]
+        paragraph = "[PARAGRAPH] Harvest is the fourth studio album by Canadian musician Neil Young , released in February 1972 on Reprise Records , catalogue MS 2032 . It featured the London Symphony Orchestra on two tracks and vocals by noted guests David Crosby , Graham Nash , Linda Ronstadt , Stephen Stills , and James Taylor . It topped the Billboard 200 album chart for two weeks , and spawned two hit singles , Old Man , which peaked at # 31 on the Billboard Hot 100 , and Heart of Gold , which reached No . 1 . It was the best-selling album of 1972 in the United States ."
+
+        table = "[TABLE] List of best-selling albums by year in the United States / Year ; Performing artist ( s ) ; Nationality ; Album / 1970 ; Simon and Garfunkel ; United States ; Bridge over Troubled Water / 1971 ; Various Artists ; - ; Jesus Christ Superstar / 1972 ; Neil Young ; Canada ; Harvest / 1973 ; War ; United States ; The World Is a Ghetto / 1974 ; Elton John ; United Kingdom ; Goodbye Yellow Brick Road / 1975 ; Elton John ; United Kingdom ; Elton John 's Greatest Hits / 1976 ; Peter Frampton ; UK/USA ; Frampton Comes Alive / 1977 ; Fleetwood Mac ; UK/USA ; Rumours / 1978 ; Soundtrack/ Bee Gees ; - ; Saturday Night Fever / 1979 ; Billy Joel ; United States ; 52nd Street"
+
+        
+        dialog_1 = "0: [MASK] 1: Yes"
+        dialog_2 = "0: Who is the best-selling album by year in the United States? 1: Neil Young 0: What country is Neil Young from? 1: Canada 0: What year did Neil Young release Harvest? 1: 1972 0: [MASK] 1: Yes"
+        dialog_3 = "0: [MASK] 1: 1972"
+        dialog_4 = "0: Who is the best-selling album by year in the United States? 1: Neil Young 0: What country is Neil Young from? 1: Canada 0: Is Harvest the fourth studio album by Canadian musician Neil Young? 1: Yes 0: [MASK] 1: 1972"
+
+        print(type(dialog_1), type(dialog_2), type(dialog_3), type(dialog_4), type(paragraph), type(table))
+        data_test = [dialog_1, dialog_2, "[DIALOG] " + dialog_1 + " " + paragraph, "[DIALOG] " + dialog_2 + " " + paragraph, dialog_3, dialog_4, "[DIALOG] " + dialog_3 + " " + table, "[DIALOG] " + dialog_4 + " " + table] 
+    
+
+    
     if mode == 'train':
 
         # dataset_train = CustomDataset(tokenized_dataset['train'])
@@ -739,6 +757,33 @@ if __name__ == "__main__":
                 )
             else:
                 early_stop_cnt += 1
+
+    elif mode == 'augment_test':
+        model.to(device)
+        model_base = T5ForConditionalGeneration.from_pretrained('t5-base')
+        state_dict = torch.load("checkpoints/qot-base.pt")['model_state_dict']
+        keys = state_dict.keys()
+        values = state_dict.values()
+        new_keys = []
+        for key in keys:
+            new_key = key.replace("module.", "")
+            new_keys.append(new_key)
+        new_dict = OrderedDict(list(zip(new_keys, values)))
+        model_base.load_state_dict(new_dict)
+        print("Model base load success from ", "checkpoints/qot-base.pt")
+        model_base.to(device)
+        model.eval()
+        model_base.eval()
+        with torch.no_grad():
+            for n, data in enumerate(data_test):
+                tok = tokenizer(data.strip(), truncation=True, return_tensors='pt')
+                input_ids = tok['input_ids'].to(device)
+                outputs = model.generate(input_ids, max_new_tokens=100)
+                outputs_base = model_base.generate(input_ids, max_new_tokens=100)
+                decoded_pred = tokenizer.decode(outputs[0], skip_special_tokens=True)  
+                decoded_pred_base =  tokenizer.decode(outputs_base[0], skip_special_tokens=True)    
+                print(f"Ours: {decoded_pred}, Baseline: {decoded_pred_base}")
+
 
     elif mode == 'augment':
 
